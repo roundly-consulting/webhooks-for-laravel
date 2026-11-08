@@ -13,17 +13,15 @@ use Illuminate\Support\Collection;
 use InvalidArgumentException;
 use JsonSerializable;
 use PHPUnit\Framework\Assert as PHPUnit;
+use RoundlyConsulting\Webhooks\Actions\Inbound\ReplayInboundDeliveryAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\BroadcastWebhookAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\PingEndpointAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\RedeliverFailedDeliveriesAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\RedeliverWebhookAction;
 use RoundlyConsulting\Webhooks\DataTransferObjects\RedeliveryResult;
 use RoundlyConsulting\Webhooks\DataTransferObjects\RotatedSecret;
-use RoundlyConsulting\Webhooks\Enums\InboundStatus;
 use RoundlyConsulting\Webhooks\Enums\OutboundStatus;
-use RoundlyConsulting\Webhooks\Exceptions\DeliveryInProgressException;
 use RoundlyConsulting\Webhooks\Exceptions\EndpointNotAcceptingException;
-use RoundlyConsulting\Webhooks\Exceptions\PayloadPrunedException;
 use RoundlyConsulting\Webhooks\Models\InboundDelivery;
 use RoundlyConsulting\Webhooks\Models\InboundEndpoint;
 use RoundlyConsulting\Webhooks\Models\OutboundDelivery;
@@ -142,13 +140,7 @@ final class WebhooksFake extends WebhooksManager
 
     public function replay(InboundDelivery $delivery): InboundDelivery
     {
-        if ($delivery->payload_pruned_at !== null || $delivery->payload === null) {
-            throw PayloadPrunedException::make();
-        }
-
-        if ($delivery->status === InboundStatus::Processing) {
-            throw DeliveryInProgressException::make();
-        }
+        ReplayInboundDeliveryAction::assertReplayable($delivery);
 
         $this->replayed[] = $delivery;
 

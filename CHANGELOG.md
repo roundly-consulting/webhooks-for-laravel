@@ -23,6 +23,8 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 - `Webhooks::send(..., id:)` repeated after the endpoint was disabled, deleted or unsubscribed from
   the type now returns the delivery queued the first time, as documented, instead of throwing
   `EndpointNotAcceptingException`; `Webhooks::fake()` behaves the same.
+- `Webhooks::fake()`'s `inbound()->replay()` now replays a `processing` run that is past its time
+  budget (a lost run), like production, instead of refusing every `processing` delivery.
 
 ## 1.0.0 - 2026-11-08
 

@@ -31,13 +31,7 @@ final readonly class ReplayInboundDeliveryAction
      */
     public function execute(InboundDelivery $delivery): InboundDelivery
     {
-        if ($delivery->payload_pruned_at !== null || $delivery->payload === null) {
-            throw PayloadPrunedException::make();
-        }
-
-        if ($delivery->status === InboundStatus::Processing && ! self::lost($delivery)) {
-            throw DeliveryInProgressException::make();
-        }
+        self::assertReplayable($delivery);
 
         $before = ['runs' => $delivery->runs, 'status' => $delivery->status, 'queued_at' => $delivery->queued_at];
         $delivery->forceFill(['runs' => $delivery->runs + 1, 'status' => InboundStatus::Queued, 'queued_at' => Clock::now()])->save();
@@ -52,6 +46,23 @@ final readonly class ReplayInboundDeliveryAction
         }
 
         return $delivery->refresh();
+    }
+
+    /**
+     * The checks a replay makes before queuing anything (shared with `Webhooks::fake()`): a body
+     * still stored, and no run in progress — a `processing` run past its budget counts as lost.
+     *
+     * @throws PayloadPrunedException|DeliveryInProgressException
+     */
+    public static function assertReplayable(InboundDelivery $delivery): void
+    {
+        if ($delivery->payload_pruned_at !== null || $delivery->payload === null) {
+            throw PayloadPrunedException::make();
+        }
+
+        if ($delivery->status === InboundStatus::Processing && ! self::lost($delivery)) {
+            throw DeliveryInProgressException::make();
+        }
     }
 
     /**

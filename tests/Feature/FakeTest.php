@@ -5,6 +5,8 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\Facade;
 use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\ExpectationFailedException;
+use RoundlyConsulting\Webhooks\Enums\InboundStatus;
+use RoundlyConsulting\Webhooks\Exceptions\DeliveryInProgressException;
 use RoundlyConsulting\Webhooks\Facades\Webhooks;
 use RoundlyConsulting\Webhooks\Models\InboundDelivery;
 use RoundlyConsulting\Webhooks\Models\OutboundDelivery;
@@ -187,6 +189,18 @@ it('fake_replay_assertions_pass_and_fail', function (): void {
     expect($fake->replayed()->sole()->is($inbound))->toBeTrue()
         ->and($inbound->refresh()->runs)->toBe(1);
     fails(fn () => $fake->assertNothingReplayed(), 'Expected nothing to be replayed, but 1');
+});
+
+it('fake replays a lost processing run like production and refuses a live one', function (): void {
+    $endpoint = inboundEndpoint();
+    $lost = InboundDelivery::factory()->create(['endpoint_id' => $endpoint->getKey(), 'status' => InboundStatus::Processing, 'processing_started_at' => now()->subDay()]);
+    $live = InboundDelivery::factory()->create(['endpoint_id' => $endpoint->getKey(), 'status' => InboundStatus::Processing, 'processing_started_at' => now()]);
+    $fake = Webhooks::fake();
+
+    Webhooks::inbound()->replay($lost);
+
+    $fake->assertReplayed($lost);
+    expect(fn () => Webhooks::inbound()->replay($live))->toThrow(DeliveryInProgressException::class);
 });
 
 it('fake_rotation_assertions_pass_and_fail', function (): void {
