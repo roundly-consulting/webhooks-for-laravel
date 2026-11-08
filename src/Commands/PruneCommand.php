@@ -10,7 +10,7 @@ use RoundlyConsulting\Webhooks\WebhooksManager;
 
 /**
  * Apply retention: clear old payloads and bodies, delete old delivery rows, clear expired
- * rotated-out secrets.
+ * rotated-out secrets, remove deleted endpoints nothing points at.
  */
 final class PruneCommand extends Command
 {
@@ -30,6 +30,7 @@ final class PruneCommand extends Command
         $this->components->twoColumnDetail('outbound deliveries', (string) $result->outboundDeliveries);
         $this->components->twoColumnDetail('attempts', (string) $result->attempts);
         $this->components->twoColumnDetail('expired secrets', (string) $result->expiredSecrets);
+        $this->components->twoColumnDetail('deleted endpoints', (string) $result->endpoints);
 
         return self::SUCCESS;
     }

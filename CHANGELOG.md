@@ -39,7 +39,9 @@ Initial public release.
   allow and block lists including the app's own hosts.
 - **Delivery log** — inbound deliveries, outbound deliveries and their attempts (status, attempts,
   response code, duration, error) without secrets; payloads encrypted at rest, a sanitizer hook,
-  retention via `webhooks:prune`, JSON resources with a swappable owner reference.
+  retention via `webhooks:prune`, JSON resources with a swappable owner reference. Deleting an
+  endpoint wipes its secrets (and an outbound URL and headers) at once; the prune removes the row
+  once no delivery points at it, and a delivery still waiting for it fails (`endpoint_deleted`).
 - **Events** — `WebhookReceived`, `WebhookRejected`, `WebhookProcessingFailed`,
   `DeliverySucceeded`, `DeliveryFailed`, `EndpointDisabled`, `EndpointSecretRotated`.
 - **Commands** — `webhooks:install`, `webhooks:doctor`, `webhooks:retry`, `webhooks:prune`,

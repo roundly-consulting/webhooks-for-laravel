@@ -12,7 +12,6 @@ use RoundlyConsulting\Webhooks\Events\WebhookProcessingFailed;
 use RoundlyConsulting\Webhooks\Events\WebhookReceived;
 use RoundlyConsulting\Webhooks\Exceptions\UnknownHandlerException;
 use RoundlyConsulting\Webhooks\Models\InboundDelivery;
-use RoundlyConsulting\Webhooks\Models\InboundEndpoint;
 use RoundlyConsulting\Webhooks\Support\Clock;
 use RoundlyConsulting\Webhooks\Support\ModelSeams;
 use Throwable;
@@ -37,9 +36,17 @@ final readonly class ProcessInboundDeliveryAction
     public function execute(int|string $deliveryId, int $run, bool $isReplay, int $attempt): void
     {
         $delivery = ModelSeams::inboundDelivery()::query()->find($deliveryId);
-        $endpoint = $delivery?->endpoint;
 
-        if ($delivery === null || ! $endpoint instanceof InboundEndpoint) {
+        if ($delivery === null) {
+            return;
+        }
+
+        $endpoint = ModelSeams::inboundEndpoint()::query()->withTrashed()->find($delivery->endpoint_id);
+
+        // Deleted before its delivery ran: fail it, never leave it `queued` forever.
+        if ($endpoint === null || $endpoint->trashed()) {
+            $this->fail($deliveryId, null, 'endpoint_deleted');
+
             return;
         }
 
@@ -79,10 +86,11 @@ final readonly class ProcessInboundDeliveryAction
     }
 
     /**
-     * The handler failed on its last try: a safe error (the exception's short name and a
-     * truncated message — never the payload) and `WebhookProcessingFailed`.
+     * The handler failed on its last try (`handler_failed`), or the endpoint is gone
+     * (`endpoint_deleted`): a safe error (the exception's short name and a truncated message —
+     * never the payload) and `WebhookProcessingFailed`.
      */
-    public function fail(int|string $deliveryId, ?Throwable $exception): void
+    public function fail(int|string $deliveryId, ?Throwable $exception, string $code = 'handler_failed'): void
     {
         $delivery = ModelSeams::inboundDelivery()::query()->find($deliveryId);
 
@@ -93,10 +101,10 @@ final readonly class ProcessInboundDeliveryAction
         $delivery->forceFill([
             'status' => InboundStatus::Failed,
             'failed_at' => Clock::now(),
-            'last_error_code' => 'handler_failed',
+            'last_error_code' => $code,
             'last_error_message' => $exception === null ? null : mb_substr(class_basename($exception).': '.$exception->getMessage(), 0, 500),
         ])->save();
 
-        $this->events->dispatch(new WebhookProcessingFailed($delivery, 'handler_failed'));
+        $this->events->dispatch(new WebhookProcessingFailed($delivery, $code));
     }
 }

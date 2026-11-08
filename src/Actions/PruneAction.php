@@ -16,8 +16,8 @@ use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
 /**
  * Retention: payloads, bodies and response excerpts older than `payloads.retention_days` are
  * cleared; delivery and attempt rows older than `payloads.delivery_retention_days` are deleted
- * for good (null keeps them); rotated-out secrets past their grace are cleared. Chunked; a dry
- * run only counts.
+ * for good (null keeps them), and with them deleted endpoints no delivery points at any more;
+ * rotated-out secrets past their grace are cleared. Chunked; a dry run only counts.
  */
 final readonly class PruneAction
 {
@@ -61,7 +61,7 @@ final readonly class PruneAction
             $dry,
         );
 
-        [$inboundDeliveries, $outboundDeliveries, $attempts] = [0, 0, 0];
+        [$inboundDeliveries, $outboundDeliveries, $attempts, $endpoints] = [0, 0, 0, 0];
         $keepDays = WebhooksConfig::deliveryRetentionDays();
 
         if ($keepDays !== null) {
@@ -77,9 +77,20 @@ final readonly class PruneAction
                 ModelSeams::inboundDelivery()::query()->withTrashed()->where('received_at', '<', $old),
                 $dry,
             );
+
+            // Deleted endpoints go once nothing in the log points at them any more.
+            $endpoints = $this->delete(
+                ModelSeams::inboundEndpoint()::query()->onlyTrashed()->where('deleted_at', '<', $old)
+                    ->whereDoesntHave('deliveries', static fn (Builder $query) => $query->withTrashed()),
+                $dry,
+            ) + $this->delete(
+                ModelSeams::outboundEndpoint()::query()->onlyTrashed()->where('deleted_at', '<', $old)
+                    ->whereDoesntHave('deliveries', static fn (Builder $query) => $query->withTrashed()),
+                $dry,
+            );
         }
 
-        return new PruneResult($inboundPayloads, $outboundBodies, $attemptBodies, $inboundDeliveries, $outboundDeliveries, $attempts, $expiredSecrets, $dry);
+        return new PruneResult($inboundPayloads, $outboundBodies, $attemptBodies, $inboundDeliveries, $outboundDeliveries, $attempts, $expiredSecrets, $dry, $endpoints);
     }
 
     /**

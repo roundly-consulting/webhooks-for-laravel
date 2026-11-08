@@ -18,11 +18,12 @@ final readonly class PruneResult
         public int $attempts,
         public int $expiredSecrets,
         public bool $dryRun,
+        public int $endpoints = 0,
     ) {}
 
     public function total(): int
     {
         return $this->inboundPayloads + $this->outboundBodies + $this->attemptBodies + $this->inboundDeliveries
-            + $this->outboundDeliveries + $this->attempts + $this->expiredSecrets;
+            + $this->outboundDeliveries + $this->attempts + $this->expiredSecrets + $this->endpoints;
     }
 }
