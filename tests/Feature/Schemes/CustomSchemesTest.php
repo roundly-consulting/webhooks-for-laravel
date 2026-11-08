@@ -207,3 +207,20 @@ it('does_not_trust_a_signed_id_flag_without_an_id', function (): void {
 
     expect(InboundDelivery::query()->count())->toBe(1);
 });
+
+it('stripe_recipe_bounds_the_signature_entries_it_checks', function (): void {
+    $secret = 'whsec_StripeStyleSecretUsedAsRawBytes';
+    $now = CarbonImmutable::now();
+    $t = (string) $now->getTimestamp();
+    $body = '{"id":"evt_1"}';
+    $valid = 'v1='.hash_hmac('sha256', $t.'.'.$body, $secret);
+    $verify = fn (string $header): VerifiedWebhook => (new StripeScheme)->verify(
+        new IncomingWebhook(['stripe-signature' => $header], $body, $now, '1', 300),
+        new EndpointSecrets([$secret], app(MacEngine::class)),
+    );
+
+    expect($verify("t={$t},".str_repeat('v1=00,', 7).$valid)->deliveryId)->toBe('evt_1')
+        // Each entry costs a MAC per secret over the body: a caller cannot make it a hundred.
+        ->and(fn () => $verify("t={$t},".str_repeat('v1=00,', 8).$valid))->toThrow(WebhookSignatureException::class)
+        ->and(fn () => $verify("t={$t},v0=".str_repeat('a', 4096).','.$valid))->toThrow(WebhookSignatureException::class);
+});

@@ -29,10 +29,19 @@ use RoundlyConsulting\Webhooks\Schemes\EndpointSecrets;
  */
 final readonly class {{ class }} implements SignatureScheme, SignsOutboundWebhooks
 {
+    /** The most `v1=` entries checked, and the longest header — each entry costs a MAC per secret. */
+    private const int MAX_ENTRIES = 8;
+
+    private const int MAX_HEADER_BYTES = 4096;
+
     public function verify(IncomingWebhook $request, EndpointSecrets $secrets): VerifiedWebhook
     {
         $header = $request->header('stripe-signature') ?? throw WebhookSignatureException::because(RejectionReason::MissingSignature);
         $parts = [];
+
+        if (strlen($header) > self::MAX_HEADER_BYTES) {
+            throw WebhookSignatureException::because(RejectionReason::InvalidSignature);
+        }
 
         foreach (explode(',', $header) as $part) {
             [$key, $value] = array_pad(explode('=', $part, 2), 2, '');
@@ -47,6 +56,10 @@ final readonly class {{ class }} implements SignatureScheme, SignsOutboundWebhoo
 
         if (abs($request->receivedAt->getTimestamp() - (int) $timestamp) > $request->toleranceSeconds) {
             throw WebhookSignatureException::because(RejectionReason::StaleTimestamp);
+        }
+
+        if (count($parts['v1'] ?? []) > self::MAX_ENTRIES) {
+            throw WebhookSignatureException::because(RejectionReason::InvalidSignature);
         }
 
         foreach ($parts['v1'] ?? [] as $hex) {
