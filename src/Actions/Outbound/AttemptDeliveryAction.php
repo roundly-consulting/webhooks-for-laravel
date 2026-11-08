@@ -372,11 +372,15 @@ final readonly class AttemptDeliveryAction
      */
     private function park(OutboundDelivery $delivery, int $delaySeconds, bool $keepToken): void
     {
+        $next = Clock::now()->addSeconds(max(1, $delaySeconds));
+
         $delivery->forceFill([
             'status' => $delivery->attempts === 0 ? OutboundStatus::Pending : OutboundStatus::Retrying,
             'claimed_until' => null,
-            'next_attempt_at' => Clock::now()->addSeconds(max(1, $delaySeconds)),
+            'next_attempt_at' => $next,
             'dispatch_token' => $keepToken ? $delivery->dispatch_token : null,
+            // The released job runs at `$next`: only unclaimed well after that is it lost.
+            'redispatch_at' => $keepToken ? $next->addSeconds(WebhooksConfig::outboundRequeueAfter()) : null,
         ])->save();
     }
 

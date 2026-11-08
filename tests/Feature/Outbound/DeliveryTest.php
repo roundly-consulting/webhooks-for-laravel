@@ -689,3 +689,32 @@ it('the_sweep_backs_off_from_jobs_a_backlogged_queue_has_not_reached', function 
     // not one more copy per delivery every sweep (that was [10, 15, 20, 25, 30]).
     expect($pushed)->toBe([10, 10, 15, 15, 15]);
 });
+
+it('the_sweep_leaves_a_released_job_alone_until_it_is_due_and_late', function (): void {
+    Http::fake(['*' => Http::response('slow down', 429, ['Retry-After' => '600'])]);
+    $endpoint = outboundEndpoint();
+    attempt(Webhooks::send($endpoint, 'invoice.paid', ['n' => 1]));   // the receiver asks for 10 minutes
+    $delivery = Webhooks::send($endpoint, 'invoice.paid', ['n' => 2]);
+    $token = (string) $delivery->refresh()->dispatch_token;
+
+    // A job that really sits on a queue: the adaptive throttle releases it for ~600 s, token kept.
+    $job = new DeliverWebhook($delivery->getKey(), $token);
+    $queued = Mockery::mock(Job::class);
+    $queued->shouldReceive('release')->once();
+    $queued->shouldReceive('isReleased')->andReturn(true);
+    $queued->shouldReceive('isDeletedOrReleased')->andReturn(true);
+    $job->setJob($queued);
+    expect(fn () => app(AttemptDeliveryAction::class)->execute($delivery->getKey(), $token, $job))->toThrow(JobReleasedException::class);
+    $due = $delivery->refresh()->next_attempt_at;
+    expect($due?->isAfter(CarbonImmutable::now()->addMinutes(5)))->toBeTrue();
+
+    // Past `requeue_after` since the dispatch, but the released job is not even due yet.
+    CarbonImmutable::setTestNow(CarbonImmutable::now()->addSeconds(130));
+    Webhooks::outbound()->dispatchDue();
+    expect($delivery->refresh()->dispatch_token)->toBe($token);
+
+    // Due and then `requeue_after` late: lost after all.
+    CarbonImmutable::setTestNow($due->addSeconds(config('webhooks.outbound.requeue_after') + 1));
+    Webhooks::outbound()->dispatchDue();
+    expect($delivery->refresh()->dispatch_token)->not->toBe($token);
+});
