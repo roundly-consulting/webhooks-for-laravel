@@ -29,4 +29,13 @@ final readonly class InboundWebhook
         public int $run,
         public int $attempt,
     ) {}
+
+    /**
+     * Whether this is the first attempt of the run — `WebhookReceived` fires on every attempt,
+     * the handler's retries included. A replay opens a new run, whose first attempt is first again.
+     */
+    public function isFirstAttempt(): bool
+    {
+        return $this->attempt <= 1;
+    }
 }

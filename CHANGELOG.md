@@ -43,7 +43,9 @@ Initial public release.
   endpoint wipes its secrets (and an outbound URL and headers) at once; the prune removes the row
   once no delivery points at it, and a delivery still waiting for it fails (`endpoint_deleted`).
 - **Events** — `WebhookReceived`, `WebhookRejected`, `WebhookProcessingFailed`,
-  `DeliverySucceeded`, `DeliveryFailed`, `EndpointDisabled`, `EndpointSecretRotated`.
+  `DeliverySucceeded`, `DeliveryFailed`, `EndpointDisabled`, `EndpointSecretRotated` — the
+  model-carrying ones re-fetch their models in a queued listener. `WebhookReceived` fires on every
+  attempt of a run; `InboundWebhook::isFirstAttempt()` tells them apart.
 - **Commands** — `webhooks:install`, `webhooks:doctor`, `webhooks:retry`, `webhooks:prune`,
   `webhooks:rotate-secret`, `webhooks:redeliver`, `webhooks:replay`. The doctor (`--json` for
   monitoring) also flags a stalled sweep, the schedule switched off, volatile (array) limiter and
