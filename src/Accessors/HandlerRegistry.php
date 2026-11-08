@@ -11,8 +11,10 @@ use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
 
 /**
  * `Webhooks::handlers()` — inbound handlers by alias: the configured ones (`webhooks.handlers`)
- * plus any `register()`ed. An endpoint stores the alias, never a class name. Scoped per
- * request/job (Octane-safe).
+ * plus any `register()`ed. An endpoint stores the alias, never a class name. One registry per
+ * process: register in a service provider's `boot()` and the handler runs for every job a worker
+ * processes. A registration made inside a request or job lasts for the rest of the process too;
+ * `forget()` removes one (tests).
  */
 final class HandlerRegistry
 {
@@ -37,6 +39,14 @@ final class HandlerRegistry
         }
 
         $this->registered[$alias] = $handler;
+    }
+
+    /**
+     * Drop a handler added with `register()`. A configured handler stays.
+     */
+    public function forget(string $alias): void
+    {
+        unset($this->registered[$alias]);
     }
 
     /**

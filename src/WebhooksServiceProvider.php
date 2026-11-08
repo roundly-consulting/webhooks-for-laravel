@@ -66,8 +66,10 @@ final class WebhooksServiceProvider extends PackageServiceProvider
         parent::register();
 
         $this->app->scoped(WebhooksManager::class);
-        $this->app->scoped(SchemeRegistry::class);
-        $this->app->scoped(HandlerRegistry::class);
+        // Process-wide: they hold only definitions, and a queue worker (Octane: every request)
+        // forgets scoped instances before each job — a boot()-time registration must outlive that.
+        $this->app->singleton(SchemeRegistry::class);
+        $this->app->singleton(HandlerRegistry::class);
         $this->app->bindIf(Randomizer::class, RandomRandomizer::class);
         $this->app->bind(PayloadSanitizer::class, static function (Application $app): PayloadSanitizer {
             $sanitizer = $app->make(WebhooksConfig::sanitizer());

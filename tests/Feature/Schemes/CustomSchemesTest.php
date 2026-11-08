@@ -3,7 +3,11 @@
 declare(strict_types=1);
 
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Facade;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\ServiceProvider;
+use RoundlyConsulting\Webhooks\Accessors\HandlerRegistry;
+use RoundlyConsulting\Webhooks\Accessors\SchemeRegistry;
 use RoundlyConsulting\Webhooks\Enums\SecretEncoding;
 use RoundlyConsulting\Webhooks\Exceptions\InvalidEndpointException;
 use RoundlyConsulting\Webhooks\Exceptions\InvalidWebhooksConfigurationException;
@@ -14,6 +18,7 @@ use RoundlyConsulting\Webhooks\Models\InboundDelivery;
 use RoundlyConsulting\Webhooks\Schemes\DefaultScheme;
 use RoundlyConsulting\Webhooks\Schemes\Rfc9421Scheme;
 use RoundlyConsulting\Webhooks\Support\Secrets;
+use RoundlyConsulting\Webhooks\Tests\Fixtures\App\Handlers\BillingWebhookHandler;
 use RoundlyConsulting\Webhooks\Tests\Fixtures\App\Schemes\GitHubScheme;
 use RoundlyConsulting\Webhooks\Tests\Fixtures\App\Schemes\StripeScheme;
 
@@ -100,13 +105,39 @@ it('registering_a_non_scheme_class_throws', function (): void {
     expect(fn () => Webhooks::schemes()->names())->toThrow(InvalidWebhooksConfigurationException::class, 'webhooks.schemes');
 });
 
-it('registries_do_not_leak_between_requests', function (): void {
-    Webhooks::schemes()->extend('temporary', GitHubScheme::class);
-    expect(Webhooks::schemes()->has('temporary'))->toBeTrue();
+it('a_scheme_extended_in_boot_survives_a_scope_reset', function (): void {
+    app()->register(new class(app()) extends ServiceProvider
+    {
+        public function boot(): void
+        {
+            Webhooks::schemes()->extend('github-boot', GitHubScheme::class);
+            Webhooks::handlers()->register('ledger-boot', BillingWebhookHandler::class);
+        }
+    });
 
-    // A new request/job scope (Octane flushes scoped instances between requests).
+    // What a queue worker does before every job, and Octane between requests.
     app()->forgetScopedInstances();
+    Facade::clearResolvedInstances();
 
-    expect(Webhooks::schemes()->has('temporary'))->toBeFalse()
+    expect(Webhooks::schemes()->has('github-boot'))->toBeTrue()
+        ->and(Webhooks::schemes()->resolve('github-boot'))->toBeInstanceOf(GitHubScheme::class)
+        ->and(Webhooks::handlers()->has('ledger-boot'))->toBeTrue()
+        ->and(Webhooks::schemes())->toBe(app(SchemeRegistry::class))
+        ->and(Webhooks::handlers())->toBe(app(HandlerRegistry::class));
+});
+
+it('forget_removes_a_registration', function (): void {
+    Webhooks::handlers()->register('ledger', BillingWebhookHandler::class);
+
+    Webhooks::schemes()->forget('stripe');
+    Webhooks::handlers()->forget('ledger');
+    Webhooks::schemes()->forget('never-registered');
+
+    expect(Webhooks::schemes()->has('stripe'))->toBeFalse()
+        ->and(Webhooks::handlers()->has('ledger'))->toBeFalse()
+        // A configured one is not a registration: forget() leaves it.
         ->and(Webhooks::schemes()->has('github'))->toBeTrue();
+
+    Webhooks::schemes()->forget('github');
+    expect(Webhooks::schemes()->has('github'))->toBeTrue();
 });

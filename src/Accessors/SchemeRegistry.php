@@ -12,8 +12,10 @@ use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
 
 /**
  * `Webhooks::schemes()` — signature schemes by name: the configured ones (`webhooks.schemes`)
- * plus any added with `extend()`. Scoped per request/job (Octane-safe), so register extensions
- * in a service provider's `boot()`.
+ * plus any added with `extend()`. One registry per process: register extensions in a service
+ * provider's `boot()` and they hold for every request, job and Octane worker request. A
+ * registration made inside a request or job lasts for the rest of the process too (like
+ * `Gate::define()`); `forget()` removes one (tests).
  */
 final class SchemeRegistry
 {
@@ -38,6 +40,14 @@ final class SchemeRegistry
         }
 
         $this->extensions[$name] = $scheme;
+    }
+
+    /**
+     * Drop a scheme added with `extend()`. A configured scheme stays.
+     */
+    public function forget(string $name): void
+    {
+        unset($this->extensions[$name]);
     }
 
     /**
