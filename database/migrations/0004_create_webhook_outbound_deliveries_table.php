@@ -36,6 +36,8 @@ return new class extends Migration
             $table->dateTime('claimed_until')->nullable();
             $table->char('dispatch_token', 26)->nullable();
             $table->dateTime('dispatched_at')->nullable();
+            // When the sweep may dispatch again a job that has not claimed the row (it is lost).
+            $table->dateTime('redispatch_at')->nullable();
             $table->dateTime('last_attempt_at')->nullable();
             $table->dateTime('succeeded_at')->nullable();
             $table->dateTime('failed_at')->nullable();
@@ -47,6 +49,7 @@ return new class extends Migration
             $table->softDeletesDatetime();
 
             $table->index(['status', 'next_attempt_at'], 'whout_dl_due_idx');
+            $table->index(['status', 'redispatch_at'], 'whout_dl_redispatch_idx');
             $table->index(['endpoint_id', 'created_at'], 'whout_dl_endpoint_idx');
             $table->foreign('endpoint_id', 'whout_dl_endpoint_fk')->references('id')->on(WebhooksConfig::outboundEndpointsTable())->restrictOnDelete();
         });

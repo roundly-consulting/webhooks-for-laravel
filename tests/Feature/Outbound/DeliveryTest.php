@@ -668,3 +668,24 @@ it('an_attempt_that_outlived_its_claim_records_nothing_over_the_sweep', function
         ->and($delivery->attempts)->toBe(1)
         ->and($delivery->dispatch_token)->not->toBeNull();
 });
+
+it('the_sweep_backs_off_from_jobs_a_backlogged_queue_has_not_reached', function (): void {
+    $endpoint = outboundEndpoint();
+
+    foreach (range(1, 5) as $i) {
+        Webhooks::send($endpoint, 'invoice.paid', ['invoice' => $i]);
+    }
+
+    $pushed = [];
+
+    // The workers are 15 minutes behind: no job claims its row.
+    foreach (range(1, 5) as $run) {
+        CarbonImmutable::setTestNow(CarbonImmutable::now()->addMinutes(3));
+        Webhooks::outbound()->dispatchDue();
+        $pushed[] = Queue::pushed(DeliverWebhook::class)->count();
+    }
+
+    // A late job gets a fresh copy, and each next copy waits twice as long as the last one did —
+    // not one more copy per delivery every sweep (that was [10, 15, 20, 25, 30]).
+    expect($pushed)->toBe([10, 10, 15, 15, 15]);
+});

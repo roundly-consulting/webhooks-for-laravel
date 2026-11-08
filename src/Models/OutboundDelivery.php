@@ -40,6 +40,7 @@ use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
  * @property CarbonImmutable|null $claimed_until
  * @property string|null $dispatch_token
  * @property CarbonImmutable|null $dispatched_at
+ * @property CarbonImmutable|null $redispatch_at
  * @property CarbonImmutable|null $last_attempt_at
  * @property CarbonImmutable|null $succeeded_at
  * @property CarbonImmutable|null $failed_at
@@ -118,6 +119,7 @@ class OutboundDelivery extends Model
             'next_attempt_at' => UtcDateTime::class,
             'claimed_until' => UtcDateTime::class,
             'dispatched_at' => UtcDateTime::class,
+            'redispatch_at' => UtcDateTime::class,
             'last_attempt_at' => UtcDateTime::class,
             'succeeded_at' => UtcDateTime::class,
             'failed_at' => UtcDateTime::class,

@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\Webhooks\Actions\Outbound;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Eloquent\Builder;
 use RoundlyConsulting\Webhooks\Enums\AttemptError;
 use RoundlyConsulting\Webhooks\Enums\InboundStatus;
 use RoundlyConsulting\Webhooks\Enums\OutboundStatus;
 use RoundlyConsulting\Webhooks\Events\DeliveryFailed;
+use RoundlyConsulting\Webhooks\Models\OutboundDelivery;
 use RoundlyConsulting\Webhooks\Models\OutboundEndpoint;
 use RoundlyConsulting\Webhooks\Support\Clock;
 use RoundlyConsulting\Webhooks\Support\ModelSeams;
@@ -20,7 +22,8 @@ use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
  * The sweep `webhooks:retry` runs every minute:
  *
  *  - outbound deliveries that are due and have no live job — parked (throttled), waiting longer
- *    than the queue can delay, or whose job is late by more than `outbound.requeue_after` (lost);
+ *    than the queue can delay, or whose job is late by more than `outbound.requeue_after` (lost;
+ *    each further copy waits twice as long as the last one did, up to an hour);
  *  - attempts whose worker died (an expired claim): recorded as `worker_lost`, then retried;
  *  - inbound deliveries stored but never queued.
  *
@@ -31,6 +34,9 @@ use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
 final readonly class DispatchDueDeliveriesAction
 {
     private const int CHUNK = 200;
+
+    /** The longest a re-dispatched job is given before the sweep tries again (seconds). */
+    private const int MAX_PATIENCE = 3600;
 
     public function __construct(
         private Queues $queues,
@@ -48,7 +54,6 @@ final readonly class DispatchDueDeliveriesAction
     private function dispatchOutbound(): int
     {
         $now = Clock::now();
-        $stale = Clock::format($now->subSeconds(WebhooksConfig::outboundRequeueAfter()));
         $batch = WebhooksConfig::sweepBatch();
         $count = 0;
 
@@ -57,16 +62,14 @@ final readonly class DispatchDueDeliveriesAction
             ->where(static fn (Builder $query) => $query->whereNull('claimed_until')->orWhere('claimed_until', '<', Clock::format($now)))
             ->where(static fn (Builder $query) => $query
                 ->where(static fn (Builder $due) => $due->whereNull('dispatch_token')->where(static fn (Builder $at) => $at->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', Clock::format($now))))
-                ->orWhere(static fn (Builder $lost) => $lost->whereNotNull('dispatch_token')
-                    ->where('dispatched_at', '<=', $stale)
-                    ->where(static fn (Builder $at) => $at->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', $stale))))
-            ->chunkById(min(self::CHUNK, $batch), function ($deliveries) use (&$count, $batch): bool {
+                ->orWhere(static fn (Builder $lost) => $lost->whereNotNull('dispatch_token')->where('redispatch_at', '<=', Clock::format($now))))
+            ->chunkById(min(self::CHUNK, $batch), function ($deliveries) use (&$count, $batch, $now): bool {
                 foreach ($deliveries as $delivery) {
                     if ($count >= $batch) {
                         return false;
                     }
 
-                    $this->queues->outbound($delivery);
+                    $this->queues->outbound($delivery, patience: self::patience($delivery, $now));
                     $count++;
                 }
 
@@ -74,6 +77,25 @@ final readonly class DispatchDueDeliveriesAction
             });
 
         return $count;
+    }
+
+    /**
+     * How long a fresh job may wait: a job that went unclaimed since its dispatch may only be
+     * late behind a backlog, so its copy gets twice that wait (capped) — a backlogged queue is not
+     * fed one more copy per delivery on every run. A row that was not dispatched (or whose job
+     * was merely due) gets the configured `outbound.requeue_after`.
+     */
+    private static function patience(OutboundDelivery $delivery, CarbonImmutable $now): ?int
+    {
+        $dispatched = $delivery->dispatch_token === null ? null : $delivery->dispatched_at;
+
+        if ($dispatched === null) {
+            return null;
+        }
+
+        $waited = (int) $dispatched->diffInSeconds($now, true);
+
+        return min(self::MAX_PATIENCE, max(WebhooksConfig::outboundRequeueAfter(), 2 * $waited));
     }
 
     /**

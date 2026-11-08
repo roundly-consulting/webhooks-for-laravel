@@ -32,13 +32,19 @@ final readonly class Queues
 
     /**
      * Dispatch the delivery's next attempt (after `$delay` seconds), after the current
-     * transaction commits.
+     * transaction commits. Unclaimed `$patience` seconds after it is due (default
+     * `outbound.requeue_after`), the sweep counts the job lost and dispatches it again.
      */
-    public function outbound(OutboundDelivery $delivery, int $delay = 0): void
+    public function outbound(OutboundDelivery $delivery, int $delay = 0, ?int $patience = null): void
     {
         $token = strtolower((string) Str::ulid());
+        $now = Clock::now();
 
-        $delivery->forceFill(['dispatch_token' => $token, 'dispatched_at' => Clock::now()])->save();
+        $delivery->forceFill([
+            'dispatch_token' => $token,
+            'dispatched_at' => $now,
+            'redispatch_at' => $now->addSeconds($delay + ($patience ?? WebhooksConfig::outboundRequeueAfter())),
+        ])->save();
 
         $job = new DeliverWebhook(Keys::of($delivery), $token);
         $job->onConnection(WebhooksConfig::queueConnection())->onQueue(WebhooksConfig::outboundQueue())->afterCommit();
