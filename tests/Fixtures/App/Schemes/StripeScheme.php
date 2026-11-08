@@ -8,7 +8,10 @@ use Carbon\CarbonImmutable;
 use RoundlyConsulting\Crypto\Codec\InvalidEncodingException;
 use RoundlyConsulting\Crypto\Facades\Crypto;
 use RoundlyConsulting\Webhooks\Contracts\SignatureScheme;
+use RoundlyConsulting\Webhooks\Contracts\SignsOutboundWebhooks;
 use RoundlyConsulting\Webhooks\DataTransferObjects\IncomingWebhook;
+use RoundlyConsulting\Webhooks\DataTransferObjects\OutgoingWebhook;
+use RoundlyConsulting\Webhooks\DataTransferObjects\SignatureHeaders;
 use RoundlyConsulting\Webhooks\DataTransferObjects\VerifiedWebhook;
 use RoundlyConsulting\Webhooks\Enums\RejectionReason;
 use RoundlyConsulting\Webhooks\Enums\SecretEncoding;
@@ -17,9 +20,11 @@ use RoundlyConsulting\Webhooks\Schemes\EndpointSecrets;
 
 /**
  * The docs recipe: `Stripe-Signature: t=<ts>,v1=<hex HMAC("t.body")>`. The key is the whole
- * `whsec_…` string as raw bytes — `SecretEncoding::Raw`, never base64-decoded.
+ * `whsec_…` string as raw bytes — `SecretEncoding::Raw`, never base64-decoded. The event id sits
+ * inside the signed body, so it is a signed id. `sign()` is optional (outbound use and
+ * `SignedWebhookRequest`).
  */
-final readonly class StripeScheme implements SignatureScheme
+final readonly class StripeScheme implements SignatureScheme, SignsOutboundWebhooks
 {
     public function verify(IncomingWebhook $request, EndpointSecrets $secrets): VerifiedWebhook
     {
@@ -49,12 +54,21 @@ final readonly class StripeScheme implements SignatureScheme
             }
 
             if ($slot !== null) {
-                $id = json_decode($request->body, true)['id'] ?? null;
+                $event = json_decode($request->body, true);
+                $id = is_array($event) ? ($event['id'] ?? null) : null;
 
-                return new VerifiedWebhook(is_string($id) ? $id : null, CarbonImmutable::createFromTimestampUTC((int) $timestamp), null, false, $slot);
+                return new VerifiedWebhook(is_string($id) ? $id : null, CarbonImmutable::createFromTimestampUTC((int) $timestamp), null, true, $slot);
             }
         }
 
         throw WebhookSignatureException::because(RejectionReason::InvalidSignature);
+    }
+
+    public function sign(OutgoingWebhook $message, EndpointSecrets $secrets): SignatureHeaders
+    {
+        $timestamp = (string) $message->timestamp->getTimestamp();
+        $signatures = array_map(static fn (string $mac): string => 'v1='.Crypto::hexEncode($mac), $secrets->sign($timestamp.'.'.$message->body, SecretEncoding::Raw));
+
+        return new SignatureHeaders(['Stripe-Signature' => 't='.$timestamp.','.implode(',', $signatures)]);
     }
 }

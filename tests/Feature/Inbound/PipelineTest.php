@@ -19,6 +19,7 @@ use RoundlyConsulting\Webhooks\Contracts\SignatureScheme;
 use RoundlyConsulting\Webhooks\DataTransferObjects\AcceptedDelivery;
 use RoundlyConsulting\Webhooks\DataTransferObjects\InboundEndpointOptions;
 use RoundlyConsulting\Webhooks\DataTransferObjects\IncomingWebhook;
+use RoundlyConsulting\Webhooks\DataTransferObjects\OutgoingWebhook;
 use RoundlyConsulting\Webhooks\DataTransferObjects\SanitizeContext;
 use RoundlyConsulting\Webhooks\DataTransferObjects\VerifiedWebhook;
 use RoundlyConsulting\Webhooks\Enums\InboundStatus;
@@ -30,6 +31,7 @@ use RoundlyConsulting\Webhooks\Facades\Webhooks;
 use RoundlyConsulting\Webhooks\Jobs\ProcessInboundDelivery;
 use RoundlyConsulting\Webhooks\Models\InboundDelivery;
 use RoundlyConsulting\Webhooks\Models\InboundEndpoint;
+use RoundlyConsulting\Webhooks\Schemes\DefaultScheme;
 use RoundlyConsulting\Webhooks\Schemes\EndpointSecrets;
 use RoundlyConsulting\Webhooks\Support\KeyRedactingSanitizer;
 use RoundlyConsulting\Webhooks\Support\MacEngine;
@@ -470,7 +472,9 @@ it('a_host_route_can_receive_through_the_manager', function (): void {
 });
 
 it('an_unknown_scheme_answers_401', function (): void {
-    postSigned(inboundEndpoint(['signature_scheme' => 'nope']))->assertStatus(401)->assertJson(['code' => 'unknown_scheme']);
+    $signDefault = fn ($request) => $request->signUsing(fn (OutgoingWebhook $message, EndpointSecrets $secrets) => (new DefaultScheme)->sign($message, $secrets));
+
+    postSigned(inboundEndpoint(['signature_scheme' => 'nope']), tune: $signDefault)->assertStatus(401)->assertJson(['code' => 'unknown_scheme']);
 });
 
 it('accepted_delivery_round_trips_through_the_idempotency_store', function (): void {

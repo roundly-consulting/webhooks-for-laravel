@@ -17,4 +17,22 @@ final readonly class SignedRequestData
         public array $headers,
         public string $body,
     ) {}
+
+    /**
+     * The headers as `$_SERVER` keys, for a test case's own call:
+     * `$this->call('POST', $data->uri, [], [], [], $data->server(), $data->body)`.
+     *
+     * @return array<string, string>
+     */
+    public function server(): array
+    {
+        $server = [];
+
+        foreach ($this->headers as $name => $value) {
+            $key = strtoupper(str_replace('-', '_', $name));
+            $server[in_array($key, ['CONTENT_TYPE', 'CONTENT_LENGTH'], true) ? $key : 'HTTP_'.$key] = $value;
+        }
+
+        return $server;
+    }
 }

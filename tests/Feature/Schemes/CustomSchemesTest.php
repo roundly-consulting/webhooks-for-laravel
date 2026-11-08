@@ -8,6 +8,8 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
 use RoundlyConsulting\Webhooks\Accessors\HandlerRegistry;
 use RoundlyConsulting\Webhooks\Accessors\SchemeRegistry;
+use RoundlyConsulting\Webhooks\DataTransferObjects\IncomingWebhook;
+use RoundlyConsulting\Webhooks\DataTransferObjects\VerifiedWebhook;
 use RoundlyConsulting\Webhooks\Enums\SecretEncoding;
 use RoundlyConsulting\Webhooks\Exceptions\InvalidEndpointException;
 use RoundlyConsulting\Webhooks\Exceptions\InvalidWebhooksConfigurationException;
@@ -16,7 +18,9 @@ use RoundlyConsulting\Webhooks\Exceptions\UnknownSchemeException;
 use RoundlyConsulting\Webhooks\Facades\Webhooks;
 use RoundlyConsulting\Webhooks\Models\InboundDelivery;
 use RoundlyConsulting\Webhooks\Schemes\DefaultScheme;
+use RoundlyConsulting\Webhooks\Schemes\EndpointSecrets;
 use RoundlyConsulting\Webhooks\Schemes\Rfc9421Scheme;
+use RoundlyConsulting\Webhooks\Support\MacEngine;
 use RoundlyConsulting\Webhooks\Support\Secrets;
 use RoundlyConsulting\Webhooks\Tests\Fixtures\App\Handlers\BillingWebhookHandler;
 use RoundlyConsulting\Webhooks\Tests\Fixtures\App\Schemes\GitHubScheme;
@@ -140,4 +144,23 @@ it('forget_removes_a_registration', function (): void {
 
     Webhooks::schemes()->forget('github');
     expect(Webhooks::schemes()->has('github'))->toBeTrue();
+});
+
+it('stripe_recipe_marks_the_body_id_signed', function (): void {
+    $secret = 'whsec_StripeStyleSecretUsedAsRawBytes';
+    $secrets = new EndpointSecrets([$secret], app(MacEngine::class));
+    $now = CarbonImmutable::now();
+    $verify = function (string $body) use ($secret, $secrets, $now): VerifiedWebhook {
+        $t = (string) $now->getTimestamp();
+        $headers = ['stripe-signature' => "t={$t},v1=".hash_hmac('sha256', $t.'.'.$body, $secret)];
+
+        return (new StripeScheme)->verify(new IncomingWebhook($headers, $body, $now, '1', 300), $secrets);
+    };
+
+    $event = $verify('{"id":"evt_1","type":"invoice.paid"}');
+    $scalar = $verify('"not an object"');
+
+    expect($event->idIsSigned)->toBeTrue()->and($event->deliveryId)->toBe('evt_1')
+        // A body that is no JSON object: no id, no crash (the pipeline refuses it with a 400 later).
+        ->and($scalar->deliveryId)->toBeNull();
 });

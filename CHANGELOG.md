@@ -56,7 +56,8 @@ Initial public release.
 - **Testing** — `Webhooks::fake()` recording sends, broadcasts, redeliveries, replays, rotations and
   disables, each with an assertion and a negative (`assertNothingBroadcast()`,
   `assertSecretNotRotated()`, …); `assertSent('invoice.paid', payload: …)` without the endpoint;
-  `SignedWebhookRequest` for
-  correctly (or deliberately badly) signed inbound requests, `FakeHostResolver` for DNS.
+  `SignedWebhookRequest` for correctly (or deliberately badly — tampered, stale, unsigned, a
+  header dropped) signed inbound requests under any scheme (its own `sign()`, or `signUsing()`),
+  `FakeHostResolver` for DNS.
 - Facade, injectable `WebhooksManager` and single-purpose actions; swappable models; bigint, uuid
   or ulid keys; English and Slovak translations.
