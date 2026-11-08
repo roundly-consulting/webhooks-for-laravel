@@ -1,0 +1,33 @@
+<?php
+
+declare(strict_types=1);
+
+return [
+    'installed' => 'Webhooks installed.',
+    'next_migrate' => 'Run `php artisan migrate`.',
+    'next_queue' => 'Run a queue worker — deliveries are processed only on the queue.',
+    'next_schedule' => 'Run the scheduler (webhooks:retry every minute, webhooks:prune daily).',
+    'doctor_ok' => 'No problems found.',
+    'doctor' => [
+        'config' => 'The webhooks configuration is not valid.',
+        'sync_queue' => 'The queue connection is sync: deliveries would be processed inside the request.',
+        'rate_limit_store' => 'The rate-limit store is in-memory: the per-endpoint throttle is per process. Use a shared store.',
+        'retry_after' => "The queue connection's retry_after is not longer than the delivery job's timeout.",
+        'curl' => 'ext-curl with CURLOPT_RESOLVE is required to pin outbound connections.',
+        'ssrf_disabled' => 'The SSRF guard is off.',
+        'http_in_production' => 'Outbound http is allowed in production.',
+        'idempotency_table' => "Sentinel's idempotency table is missing: publish and run sentinel's migrations.",
+        'tables' => 'The webhooks tables are missing: run the migrations.',
+        'unknown_scheme' => 'An endpoint uses an unknown signature scheme.',
+        'unknown_handler' => 'An endpoint uses an unknown handler.',
+        'rfc9421_id_unsigned' => 'An RFC 9421 endpoint\'s profile does not cover its delivery id header.',
+    ],
+    'pruned' => 'Pruned :count record(s).',
+    'pruned_dry' => 'Would prune :count record(s).',
+    'dispatched' => 'Dispatched :count delivery job(s).',
+    'rotated' => 'Secret rotated. The previous one works until :until. The new secret (shown once):',
+    'invalid_arguments' => 'Give a direction (inbound or outbound), an endpoint id and, optionally, a grace in seconds.',
+    'delivery_not_found' => 'The delivery was not found.',
+    'redelivered' => 'The delivery was queued again.',
+    'replayed' => 'The delivery was queued for a replay.',
+];

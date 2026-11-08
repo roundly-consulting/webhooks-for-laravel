@@ -1,0 +1,29 @@
+{
+    "algorithm": "signed_content = webhook-id + '.' + webhook-timestamp + '.' + body; signature = 'v1,' + base64(HMAC-SHA256(base64-decode(secret without 'whsec_'), signed_content))",
+    "vectors": [
+        {
+            "name": "V-1 (Standard Webhooks' published vector)",
+            "secrets": ["whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"],
+            "id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
+            "timestamp": "1614265330",
+            "body": "{\"test\": 2432232314}",
+            "signature": "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+        },
+        {
+            "name": "V-2 (our envelope)",
+            "secrets": ["whsec_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="],
+            "id": "msg_01JCDEF0000000000000000000",
+            "timestamp": "1794139200",
+            "body": "{\"type\":\"invoice.paid\",\"timestamp\":\"2026-11-08T12:00:00Z\",\"data\":{\"invoice\":42}}",
+            "signature": "v1,dBcYxACDimm+8xx9Ykx71LVUgk5H4STQXxAUHZ5xcNk="
+        },
+        {
+            "name": "V-3 (rotation: current first, then previous)",
+            "secrets": ["whsec_ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8=", "whsec_AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="],
+            "id": "msg_01JCDEF0000000000000000000",
+            "timestamp": "1794139200",
+            "body": "{\"type\":\"invoice.paid\",\"timestamp\":\"2026-11-08T12:00:00Z\",\"data\":{\"invoice\":42}}",
+            "signature": "v1,Nwl36Rvbn1xO29I4VEpYVwe7HJ3vZuLKGz6KoEVZDFI= v1,dBcYxACDimm+8xx9Ykx71LVUgk5H4STQXxAUHZ5xcNk="
+        }
+    ]
+}
