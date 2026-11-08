@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
+use RoundlyConsulting\SafeFetch\Contracts\HostResolver;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
@@ -197,9 +198,10 @@ it('runs the inbound examples', function (): void {
 it('runs the outbound examples', function (): void {
     $team = team();
 
+    realDns();
     // docs: outbound.md #0
     $created = Webhooks::for($team)->outbound()->create(
-        'https://hooks.example.com/roundly',
+        'https://example.com/webhooks',
         events: ['invoice.*', 'customer.created'],      // exact, prefix.*, or *
         name: 'ERP',
         headers: ['X-Tenant' => 'acme'],                // custom headers (validated)
@@ -207,6 +209,7 @@ it('runs the outbound examples', function (): void {
     );
     $created->secret;   // whsec_… — hand it to the receiver once
     // end docs
+    publicDns();
 
     $endpoint = $created->endpoint;
     $payload = ['invoice' => 42];
@@ -279,11 +282,12 @@ it('runs the outbound endpoint management example', function (): void {
     $team = team();
     $id = Webhooks::for($team)->outbound()->create('https://hooks.example.com/in')->endpoint->getKey();
 
+    realDns();
     // docs: endpoints.md #1
     $endpoint = Webhooks::for($team)->outbound()->find($id);
 
     Webhooks::outbound()->update($endpoint, new OutboundEndpointChanges(
-        url: 'https://hooks.example.com/v2',            // judged by the SSRF guard again
+        url: 'https://example.com/webhooks/v2',         // judged by the SSRF guard again
         events: ['invoice.*', 'customer.created'],
         headers: ['X-Tenant' => 'acme'],                 // replaces the custom headers
         options: new OutboundEndpointOptions(rateLimitPerMinute: 10, description: 'ERP sync'),
@@ -294,6 +298,7 @@ it('runs the outbound endpoint management example', function (): void {
     Webhooks::outbound()->enable($endpoint);    // the failure counter starts again from 0
     Webhooks::outbound()->delete($endpoint);    // secrets, URL and custom headers wiped at once
     // end docs
+    publicDns();
 
     $endpoint->refresh();
     expect($endpoint->trashed())->toBeTrue()
@@ -307,12 +312,14 @@ it('runs the outbound endpoint management example', function (): void {
 it('runs the owner trait example', function (): void {
     $team = team();
 
+    realDns();
     // docs: endpoints.md #3
-    $team->webhooks()->outbound()->create('https://hooks.example.com/in', events: ['invoice.*']);   // = Webhooks::for($team)
+    $team->webhooks()->outbound()->create('https://example.com/webhooks', events: ['invoice.*']);   // = Webhooks::for($team)
     $team->outboundWebhookEndpoints()->where('enabled', true)->get();                                // MorphMany relations
     $team->inboundWebhookEndpoints()->count();
     $team->broadcastWebhook('invoice.paid', ['invoice' => 42]);
     // end docs
+    publicDns();
 
     expect(OutboundDelivery::query()->count())->toBe(1);
 });
@@ -523,6 +530,15 @@ function rfc9421DocsEndpoint(): InboundEndpoint
     Sentinel::keys()->ring('http')->import('partner', Algorithm::HmacSha256, $key, owner: $endpoint);
 
     return $endpoint;
+}
+
+/**
+ * The system resolver again: a docs example that creates a live endpoint must name a host that
+ * resolves publicly, so it runs as written (the SSRF guard checks the host on save).
+ */
+function realDns(): void
+{
+    app()->forgetInstance(HostResolver::class);
 }
 
 it('keeps the docs and these copies identical', function (): void {
