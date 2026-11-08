@@ -73,6 +73,6 @@ final class ProcessInboundDelivery implements ShouldQueue
 
     public function failed(?Throwable $exception): void
     {
-        app(ProcessInboundDeliveryAction::class)->fail($this->deliveryId, $exception);
+        app(ProcessInboundDeliveryAction::class)->fail($this->deliveryId, $exception, run: $this->run);
     }
 }

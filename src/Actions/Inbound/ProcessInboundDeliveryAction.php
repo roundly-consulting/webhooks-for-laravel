@@ -91,20 +91,27 @@ final readonly class ProcessInboundDeliveryAction
      * name (and a short code, such as an SQLSTATE) is stored — a message may quote the payload or
      * the SQL with its bound values; the full exception goes to `report()` with the failed job.
      */
-    public function fail(int|string $deliveryId, ?Throwable $exception, string $code = 'handler_failed'): void
+    public function fail(int|string $deliveryId, ?Throwable $exception, string $code = 'handler_failed', ?int $run = null): void
     {
-        $delivery = ModelSeams::inboundDelivery()::query()->find($deliveryId);
+        // Only the current run, and never a processed one: a released duplicate copy that runs
+        // out of tries after the run succeeded (or after a replay opened the next run) must not
+        // overwrite its outcome.
+        $failed = ModelSeams::inboundDelivery()::query()
+            ->whereKey($deliveryId)
+            ->where('status', '!=', InboundStatus::Processed->value)
+            ->when($run !== null, static fn ($query) => $query->where('runs', $run))
+            ->update([
+                'status' => InboundStatus::Failed->value,
+                'failed_at' => Clock::format(Clock::now()),
+                'last_error_code' => $code,
+                'last_error_message' => $exception === null ? null : self::summary($exception),
+                'updated_at' => Clock::format(Clock::now()),
+            ]);
+        $delivery = $failed === 1 ? ModelSeams::inboundDelivery()::query()->find($deliveryId) : null;
 
         if (! $delivery instanceof InboundDelivery) {
             return;
         }
-
-        $delivery->forceFill([
-            'status' => InboundStatus::Failed,
-            'failed_at' => Clock::now(),
-            'last_error_code' => $code,
-            'last_error_message' => $exception === null ? null : self::summary($exception),
-        ])->save();
 
         $this->events->dispatch(new WebhookProcessingFailed($delivery, $code));
     }

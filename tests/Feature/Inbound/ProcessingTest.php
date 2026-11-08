@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
+use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
@@ -217,4 +218,27 @@ it('never stores the message of a handler exception, which may carry payload dat
         ->and($rendered)->toContain('QueryException (HY000)');
 
     Webhooks::handlers()->forget('leaky');
+});
+
+it('a_late_failing_copy_of_a_finished_or_superseded_run_changes_nothing', function (): void {
+    postSigned(inboundEndpoint(['handler' => 'billing']))->assertStatus(202);
+    $delivery = InboundDelivery::query()->sole();
+    expect($delivery->status)->toBe(InboundStatus::Processed);
+    Event::fake([WebhookProcessingFailed::class]);
+
+    // A released duplicate copy exhausting its tries after the run already succeeded…
+    (new ProcessInboundDelivery($delivery->getKey(), 1))->failed(new MaxAttemptsExceededException('x'));
+    expect($delivery->refresh()->status)->toBe(InboundStatus::Processed)->and($delivery->last_error_code)->toBeNull();
+
+    // …or a copy of run 1 failing while run 2 (a replay) is under way.
+    $delivery->forceFill(['runs' => 2, 'status' => InboundStatus::Processing])->save();
+    (new ProcessInboundDelivery($delivery->getKey(), 1))->failed(new MaxAttemptsExceededException('x'));
+    expect($delivery->refresh()->status)->toBe(InboundStatus::Processing);
+
+    Event::assertNotDispatched(WebhookProcessingFailed::class);
+
+    // The current run's own failure still counts.
+    (new ProcessInboundDelivery($delivery->getKey(), 2))->failed(new RuntimeException('down'));
+    expect($delivery->refresh()->status)->toBe(InboundStatus::Failed);
+    Event::assertDispatched(WebhookProcessingFailed::class);
 });
