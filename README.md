@@ -70,7 +70,7 @@ final class BillingWebhookHandler implements InboundHandler
 Send: signed, retried, throttled and SSRF-guarded.
 
 ```php
-$outbound = Webhooks::for($team)->outbound()->create('https://hooks.example.com/roundly', events: ['invoice.*']);
+$outbound = Webhooks::for($team)->outbound()->create('https://example.com/webhooks', events: ['invoice.*']);
 $outbound->secret; // whsec_… — hand it to the receiver once
 
 Webhooks::send($outbound->endpoint, 'invoice.paid', ['invoice' => 42]);

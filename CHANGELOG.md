@@ -6,6 +6,12 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 
 ## Unreleased
 
+### Changed
+
+- Documentation: the README's send example now creates its endpoint at
+  `https://example.com/webhooks`, a host that resolves publicly, so it runs as written; the old
+  `hooks.example.com` has no DNS record and the SSRF guard refused it.
+
 ### Fixed
 
 - An inbound body guard on a scheme with a signed timestamp (a Stripe-style recipe whose body has no

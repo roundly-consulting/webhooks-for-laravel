@@ -22,12 +22,16 @@ it('has PHP blocks that parse', function (): void {
 
 it('runs the usage example', function (): void {
     Queue::fake();
-    publicDns();
     $team = team();
+
+    // The README's create call, line for line — run below against real DNS (no faked resolver):
+    // the SSRF guard checks the host on save, so a URL that does not resolve publicly fails here.
+    expect((string) file_get_contents(__DIR__.'/../../README.md'))
+        ->toContain("\$outbound = Webhooks::for(\$team)->outbound()->create('https://example.com/webhooks', events: ['invoice.*']);");
 
     // A verbatim copy of the README's calls.
     $inbound = Webhooks::for($team)->inbound()->create(handler: 'billing');
-    $outbound = Webhooks::for($team)->outbound()->create('https://hooks.example.com/roundly', events: ['invoice.*']);
+    $outbound = Webhooks::for($team)->outbound()->create('https://example.com/webhooks', events: ['invoice.*']);
     $delivery = Webhooks::send($outbound->endpoint, 'invoice.paid', ['invoice' => 42]);
 
     expect($inbound)->toBeInstanceOf(CreatedInboundEndpoint::class)
