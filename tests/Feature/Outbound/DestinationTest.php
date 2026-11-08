@@ -316,3 +316,16 @@ it('stops_sending_a_stored_header_whose_override_was_revoked', function (): void
     Http::assertSent(fn (ClientRequest $request): bool => $request->hasHeader('X-Other') && $request->header('Content-Length') !== ['1']);
     Http::assertNotSent(fn (ClientRequest $request): bool => $request->hasHeader('Authorization'));
 });
+
+it('an_endpoint_user_agent_replaces_the_package_one', function (): void {
+    Http::fake(['*' => Http::response('ok')]);
+    $mine = outboundEndpoint(attributes: ['headers' => ['user-agent' => 'TenantAgent/1.0']]);
+    $plain = outboundEndpoint();
+
+    attempt(Webhooks::send($mine, 'invoice.paid', []));
+    attempt(Webhooks::send($plain, 'invoice.paid', []));
+
+    // One User-Agent value each, never both merged into one header.
+    expect(Http::recorded()->map(fn (array $pair): array => $pair[0]->header('User-Agent'))->all())
+        ->toBe([['TenantAgent/1.0'], ['Laravel Webhooks']]);
+});

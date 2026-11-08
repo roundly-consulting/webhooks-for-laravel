@@ -205,7 +205,9 @@ final readonly class AttemptDeliveryAction
         $request = $this->http->rateLimit($limit)
             ->connectTimeout(WebhooksConfig::connectTimeout())
             ->timeout(WebhooksConfig::totalTimeout())
-            ->withHeaders([...HeaderRules::sendable($endpoint->headers ?? []), 'User-Agent' => WebhooksConfig::userAgent()]);
+            // One spelling (the stored names are lower case): an endpoint's own `user-agent`
+            // replaces the package's instead of joining it as a second value.
+            ->withHeaders(['user-agent' => WebhooksConfig::userAgent(), ...HeaderRules::sendable($endpoint->headers ?? [])]);
 
         $request = $this->sign($request, $delivery, $endpoint, $body);
         // Guarded: safe-fetch reads at most max_response_bytes. Unguarded: a sink keeps one byte
