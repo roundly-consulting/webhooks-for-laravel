@@ -76,6 +76,8 @@ final readonly class Rfc9421Scheme implements SignatureScheme
             null,
             $signed,
             SecretSlot::Current,
+            // Sentinel remembered the nonce: this exact request can never verify again.
+            replayProtected: $verified->nonce !== null,
         );
     }
 

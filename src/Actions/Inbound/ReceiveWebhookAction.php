@@ -149,7 +149,9 @@ final readonly class ReceiveWebhookAction
     /**
      * The idempotency run: once per delivery id per endpoint, fingerprinted by the body digest.
      * An id the signature does not cover gets a second guard on the body itself, so a captured
-     * delivery resent under a fresh id header is still a duplicate.
+     * delivery resent under a fresh id header is still a duplicate — unless the scheme already
+     * refuses a second use of the request (a verified RFC 9421 nonce), where the guard would only
+     * merge distinct deliveries that happen to share a body.
      *
      * @param  array<array-key, mixed>  $payload
      * @param  array<string, string>  $headers
@@ -165,7 +167,7 @@ final readonly class ReceiveWebhookAction
 
         // Signed only when the scheme supplied the id: an id-less verdict falls back to the
         // unsigned `Idempotency-Key`, whatever the scheme claims.
-        if ($verified->idIsSigned && $verified->deliveryId !== null && $verified->deliveryId !== '') {
+        if ($verified->replayProtected || ($verified->idIsSigned && $verified->deliveryId !== null && $verified->deliveryId !== '')) {
             return AcceptedDelivery::fromStored($run());
         }
 

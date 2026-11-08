@@ -204,3 +204,27 @@ it('accepts the unchanged resend of an RFC 9421 delivery it refused with 429', f
 
     expect(InboundDelivery::query()->count())->toBe(2);
 });
+
+it('keeps two RFC 9421 deliveries with the same body under an unsigned id apart', function (): void {
+    $endpoint = rfc9421Endpoint(options: ['id_header' => 'x-delivery']);
+    $send = fn (string $id) => SignedWebhookRequest::for($endpoint)->keyId('partner')->body('{"type":"ping"}')->withHeader('X-Delivery', $id)->toRequest();
+    $post = function ($signed) {
+        $server = ['CONTENT_TYPE' => 'application/json'];
+
+        foreach ($signed->headers as $name => $value) {
+            $server[strtoupper(str_replace('-', '_', $name)) === 'CONTENT_TYPE' ? 'CONTENT_TYPE' : 'HTTP_'.strtoupper(str_replace('-', '_', $name))] = $value;
+        }
+
+        return $this->call('POST', $signed->uri, [], [], [], $server, $signed->body);
+    };
+    $first = $send('d-1');
+
+    $post($first)->assertStatus(202);
+    // Another delivery, byte-identical body, its own nonce: the nonce already rules out a
+    // replay, so no body guard may merge it into the first.
+    $post($send('d-2'))->assertStatus(202);
+    // The verbatim resend of the first is still caught (its nonce, its stored id).
+    $post($first)->assertStatus(200)->assertJson(['status' => 'duplicate']);
+
+    expect(InboundDelivery::query()->pluck('idempotency_key')->sort()->values()->all())->toBe(['d-1', 'd-2']);
+});
