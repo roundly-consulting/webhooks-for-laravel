@@ -22,6 +22,7 @@ use RoundlyConsulting\Webhooks\Commands\DoctorCommand;
 use RoundlyConsulting\Webhooks\Commands\EnableCommand;
 use RoundlyConsulting\Webhooks\Commands\EndpointsCommand;
 use RoundlyConsulting\Webhooks\Commands\InstallCommand;
+use RoundlyConsulting\Webhooks\Commands\MakeSchemeCommand;
 use RoundlyConsulting\Webhooks\Commands\PingCommand;
 use RoundlyConsulting\Webhooks\Commands\PruneCommand;
 use RoundlyConsulting\Webhooks\Commands\RedeliverCommand;
@@ -58,6 +59,7 @@ final class WebhooksServiceProvider extends PackageServiceProvider
                 EndpointsCommand::class,
                 EnableCommand::class,
                 PingCommand::class,
+                MakeSchemeCommand::class,
             ])
             ->contributesToAbout(static fn (): array => [
                 'Route prefix' => WebhooksConfig::routeEnabled() ? '/'.WebhooksConfig::routePrefix().'/{key}' : 'OFF',

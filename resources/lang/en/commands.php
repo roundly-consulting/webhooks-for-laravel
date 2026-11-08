@@ -47,4 +47,7 @@ return [
     'enabled' => 'The endpoint is enabled.',
     'invalid_owner' => 'Give the owner as "morph-class:id", e.g. --owner="App\\Models\\Team:5".',
     'no_endpoints' => 'No endpoints.',
+    'invalid_recipe' => 'Give a recipe (github, stripe or blank) and, optionally, a StudlyCase class name.',
+    'scheme_exists' => 'The class already exists at :path (use --force to overwrite).',
+    'scheme_created' => ':class written to :path. Register it in a service provider\'s boot(): Webhooks::schemes()->extend(\'name\', :class::class).',
 ];

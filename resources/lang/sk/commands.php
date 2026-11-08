@@ -47,4 +47,7 @@ return [
     'enabled' => 'Endpoint je zapnutý.',
     'invalid_owner' => 'Zadajte vlastníka ako „morph-class:id“, napr. --owner="App\\Models\\Team:5".',
     'no_endpoints' => 'Žiadne endpointy.',
+    'invalid_recipe' => 'Zadajte recept (github, stripe alebo blank) a voliteľne názov triedy v tvare StudlyCase.',
+    'scheme_exists' => 'Trieda už existuje v :path (prepíšete ju s --force).',
+    'scheme_created' => 'Trieda :class bola zapísaná do :path. Zaregistrujte ju v metóde boot() service providera: Webhooks::schemes()->extend(\'name\', :class::class).',
 ];

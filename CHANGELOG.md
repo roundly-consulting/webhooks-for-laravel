@@ -54,7 +54,8 @@ Initial public release.
 - **Commands** — `webhooks:install`, `webhooks:doctor`, `webhooks:retry`, `webhooks:prune`,
   `webhooks:rotate-secret`, `webhooks:redeliver`, `webhooks:replay`, `webhooks:endpoints` (a
   listing without secrets), `webhooks:enable` and `webhooks:ping` (a `webhook.ping` test event,
-  also `outbound()->ping()`). The doctor (`--json` for
+  also `outbound()->ping()`), `webhooks:make-scheme github|stripe|blank` (a signature-scheme class
+  written into your app from a recipe). The doctor (`--json` for
   monitoring) also flags a stalled sweep, the schedule switched off, volatile (array) limiter and
   idempotency stores, a queue `retry_after` shorter than the handler timeout, and an SQS
   `max_delay` over 900 seconds.

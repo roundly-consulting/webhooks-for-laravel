@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\File;
 use RoundlyConsulting\Webhooks\Tests\TestCase;
 
 /**
- * `webhooks:install` publishes into the host's config/ and database/: here a throwaway directory
+ * `webhooks:install` publishes into the host's config/ and database/ (`webhooks:make-scheme` into app/): here a throwaway directory
  * per test, set before the providers boot — never the shared Testbench skeleton.
  */
 abstract class InstallTestCase extends TestCase
@@ -29,6 +29,7 @@ abstract class InstallTestCase extends TestCase
 
         $app->useConfigPath($this->sandbox.'/config');
         $app->useDatabasePath($this->sandbox.'/database');
+        $app->useAppPath($this->sandbox.'/app');
     }
 
     protected function tearDown(): void

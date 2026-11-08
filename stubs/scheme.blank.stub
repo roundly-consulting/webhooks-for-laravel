@@ -1,0 +1,49 @@
+<?php
+
+declare(strict_types=1);
+
+namespace {{ namespace }};
+
+use RoundlyConsulting\Crypto\Codec\InvalidEncodingException;
+use RoundlyConsulting\Crypto\Facades\Crypto;
+use RoundlyConsulting\Webhooks\Contracts\SignatureScheme;
+use RoundlyConsulting\Webhooks\DataTransferObjects\IncomingWebhook;
+use RoundlyConsulting\Webhooks\DataTransferObjects\VerifiedWebhook;
+use RoundlyConsulting\Webhooks\Enums\RejectionReason;
+use RoundlyConsulting\Webhooks\Enums\SecretEncoding;
+use RoundlyConsulting\Webhooks\Exceptions\WebhookSignatureException;
+use RoundlyConsulting\Webhooks\Schemes\EndpointSecrets;
+
+/**
+ * A webhooks-for-laravel signature scheme (`php artisan webhooks:make-scheme blank`). Fill in the
+ * sender's format: read its headers, rebuild the signed message, and ask `$secrets->matches()`
+ * whether the MAC fits — the scheme never sees a secret. Implement `SignsOutboundWebhooks` too if
+ * you send in this format (and for `SignedWebhookRequest` in your tests).
+ *
+ * Register it in a service provider's boot(): Webhooks::schemes()->extend('my-sender', {{ class }}::class);
+ */
+final readonly class {{ class }} implements SignatureScheme
+{
+    public function verify(IncomingWebhook $request, EndpointSecrets $secrets): VerifiedWebhook
+    {
+        $signature = $request->header('x-signature') ?? throw WebhookSignatureException::because(RejectionReason::MissingSignature);
+
+        try {
+            $mac = Crypto::hexDecode($signature);
+        } catch (InvalidEncodingException) {
+            $mac = '';
+        }
+
+        // The MAC of the raw body, keyed by the secret's bytes. Adjust to the sender's format.
+        $slot = $secrets->matches($request->body, $mac, SecretEncoding::Raw)
+            ?? throw WebhookSignatureException::because(RejectionReason::InvalidSignature);
+
+        return new VerifiedWebhook(
+            deliveryId: $request->header('x-delivery-id'),   // the sender's delivery id, for dedupe
+            timestamp: null,                                   // the signed time, if the format has one
+            eventType: $request->header('x-event'),
+            idIsSigned: false,                                 // true only when the id is covered by the MAC
+            slot: $slot,
+        );
+    }
+}
