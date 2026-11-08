@@ -349,9 +349,22 @@ final class WebhooksConfig
         return array_map(strtolower(...), Config::list('webhooks.outbound.headers.allowed_overrides', []));
     }
 
+    /**
+     * The configured User-Agent, else "{app.name} Webhooks" (`Laravel Webhooks` without a name) —
+     * the host's name, never ours.
+     */
     public static function userAgent(): string
     {
-        return Config::string('webhooks.outbound.user_agent', 'Roundly-Webhooks/1.0');
+        $configured = self::optional(Config::string('webhooks.outbound.user_agent', ''));
+
+        if ($configured !== null) {
+            return $configured;
+        }
+
+        $name = config('app.name');
+        $name = is_string($name) ? trim(preg_replace('/[\x00-\x1f\x7f]+/', ' ', $name) ?? '') : '';
+
+        return ($name === '' ? 'Laravel' : $name).' Webhooks';
     }
 
     public static function ssrfEnabled(): bool

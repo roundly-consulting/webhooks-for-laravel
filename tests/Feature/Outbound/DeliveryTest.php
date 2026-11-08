@@ -483,3 +483,31 @@ it('reads the throttle state through the rate-limits fake', function (): void {
 
     $limits->assertAllowed('webhooks:out:'.$endpoint->getKey());
 });
+
+it('user_agent_defaults_to_the_app_name', function (?string $name, string $agent): void {
+    config()->set('app.name', $name);
+    $seen = null;
+    Http::fake(function (ClientRequest $request) use (&$seen) {
+        $seen = $request->header('User-Agent')[0] ?? null;
+
+        return Http::response('ok');
+    });
+
+    attempt(Webhooks::send(outboundEndpoint(), 'invoice.paid', []));
+
+    expect($seen)->toBe($agent);
+})->with([
+    'named app' => ['Acme Billing', 'Acme Billing Webhooks'],
+    'no name' => [null, 'Laravel Webhooks'],
+    'blank name' => ['  ', 'Laravel Webhooks'],
+    'control characters' => ["Acme\r\nX-Injected: 1", 'Acme X-Injected: 1 Webhooks'],
+]);
+
+it('a_configured_user_agent_wins', function (): void {
+    config()->set('webhooks.outbound.user_agent', 'Acme-Hooks/2.0 (+https://acme.test/webhooks)');
+    Http::fake(['*' => Http::response('ok')]);
+
+    attempt(Webhooks::send(outboundEndpoint(), 'invoice.paid', []));
+
+    Http::assertSent(fn (ClientRequest $request): bool => $request->header('User-Agent') === ['Acme-Hooks/2.0 (+https://acme.test/webhooks)']);
+});

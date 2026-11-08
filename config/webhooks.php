@@ -164,7 +164,8 @@ return [
             // Reserved custom headers an endpoint may still set, e.g. ['authorization'].
             'allowed_overrides' => [],
         ],
-        'user_agent' => 'Roundly-Webhooks/1.0',
+        // The User-Agent your receivers see. Blank = "{app.name} Webhooks".
+        'user_agent' => env('WEBHOOKS_USER_AGENT'),
     ],
 
     /*
