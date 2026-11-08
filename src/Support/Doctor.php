@@ -170,6 +170,10 @@ final readonly class Doctor
             if ($endpoint->signature_scheme === 'rfc9421' && ! $this->hasBoundKey($endpoint)) {
                 $findings[] = DoctorFinding::warning('rfc9421_no_key', $key);
             }
+
+            if ($endpoint->signature_scheme === 'rfc9421' && self::profileWeak($endpoint->scheme_options ?? [])) {
+                $findings[] = DoctorFinding::warning('rfc9421_profile_weak', $key);
+            }
         }
 
         foreach (ModelSeams::outboundEndpoint()::query()->cursor() as $endpoint) {
@@ -230,6 +234,28 @@ final readonly class Doctor
 
         foreach ($keys as $key) {
             if ($key->ownerType === $endpoint->getMorphClass() && Keys::string($key->ownerId) === Keys::string($endpoint->getKey())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether the endpoint's profile lets a signature through without a nonce (replay protection
+     * then rests on the id) or without a content digest (the body is then not signed).
+     *
+     * @param  array<array-key, mixed>  $options
+     */
+    private static function profileWeak(array $options): bool
+    {
+        $profile = $options['profile'] ?? WebhooksConfig::rfc9421Profile();
+
+        foreach (['require_nonce', 'require_content_digest'] as $flag) {
+            $value = is_string($profile) ? config("sentinel.signatures.profiles.{$profile}.{$flag}") : null;
+
+            // Sentinel's default for both is on: only an explicit "off" weakens the profile.
+            if (filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) === false) {
                 return true;
             }
         }

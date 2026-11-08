@@ -22,6 +22,7 @@ return [
         'unknown_handler' => 'An endpoint uses an unknown handler.',
         'rfc9421_no_key' => 'An RFC 9421 endpoint has no sentinel key bound to it.',
         'rfc9421_id_unsigned' => 'An RFC 9421 endpoint\'s profile does not cover its delivery id header.',
+        'rfc9421_profile_weak' => 'An RFC 9421 endpoint\'s profile accepts signatures without a nonce or without a content digest: replays or altered bodies may pass.',
         'schedule_disabled' => 'The schedule is off (webhooks.schedule.enabled): run webhooks:retry every minute yourself, or parked and long-delayed deliveries never move.',
         'sweep_stalled' => 'Deliveries due for over 10 minutes are waiting for the sweep: webhooks:retry is not running.',
         'limiter_store_volatile' => 'The inbound rate limiters use an array cache store: limits reset with every request. Use a shared store.',

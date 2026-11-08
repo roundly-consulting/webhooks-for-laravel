@@ -22,6 +22,7 @@ return [
         'unknown_handler' => 'Endpoint používa neznámu obsluhu.',
         'rfc9421_no_key' => 'Endpoint RFC 9421 nemá priradený žiadny kľúč zo sentinelu.',
         'rfc9421_id_unsigned' => 'Profil endpointu RFC 9421 nepokrýva hlavičku s identifikátorom doručenia.',
+        'rfc9421_profile_weak' => 'Profil endpointu RFC 9421 prijíma podpisy bez nonce alebo bez content digest: môžu prejsť opakované požiadavky alebo zmenené telá.',
         'schedule_disabled' => 'Plánovanie je vypnuté (webhooks.schedule.enabled): spúšťajte webhooks:retry každú minútu sami, inak sa odložené doručenia nepohnú.',
         'sweep_stalled' => 'Doručenia splatné viac ako 10 minút čakajú na webhooks:retry: príkaz sa nespúšťa.',
         'limiter_store_volatile' => 'Limity prichádzajúcich požiadaviek používajú úložisko cache array: s každou požiadavkou sa vynulujú. Použite zdieľané úložisko.',

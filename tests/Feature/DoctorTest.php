@@ -170,3 +170,14 @@ it('doctor_flags_an_rfc9421_endpoint_whose_ring_does_not_read', function (): voi
 
     expect(doctorFinding('rfc9421_no_key')?->detail)->toBe((string) $endpoint->getKey());
 });
+
+it('doctor_flags_an_rfc9421_profile_without_nonce_or_body_binding', function (string $flag): void {
+    $endpoint = inboundEndpoint(['signature_scheme' => 'rfc9421']);
+    expect(doctorChecks())->not->toContain('rfc9421_profile_weak');
+
+    // Without a nonce the replay guarantee rests on the id; without a content digest the body is not signed.
+    config()->set("sentinel.signatures.profiles.default.{$flag}", false);
+
+    expect(doctorFinding('rfc9421_profile_weak')?->detail)->toBe((string) $endpoint->getKey())
+        ->and(doctorFinding('rfc9421_profile_weak')?->level)->toBe(FindingLevel::Warning);
+})->with(['require_nonce', 'require_content_digest']);
