@@ -11,6 +11,7 @@ use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 use JsonSerializable;
 use PHPUnit\Framework\Assert as PHPUnit;
 use RoundlyConsulting\Webhooks\Actions\Outbound\BroadcastWebhookAction;
@@ -34,7 +35,9 @@ use SensitiveParameter;
 /**
  * Installed by `Webhooks::fake()`. Sends, broadcasts, redeliveries and replays are validated
  * exactly like production (same exceptions) and recorded — nothing is queued, nothing is sent,
- * no delivery is written. Endpoint management, `receive()` and `verify()` run for real (a signed
+ * no delivery is written: a faked `send()` returns an unsaved delivery (`getKey()` is null). Every
+ * recorded verb has an `assert…()` and a negative (`assertNot…()` / `assertNothing…()` /
+ * `assertNo…()`). Endpoint management, `receive()` and `verify()` run for real (a signed
  * request test works under the fake), and rotations / enable / disable are recorded too. Every
  * call through `inbound()`, `outbound()`, `for($owner)` and the `HasWebhooks` trait is seen.
  */
@@ -43,7 +46,7 @@ final class WebhooksFake extends WebhooksManager
     /** @var list<SentWebhook> */
     private array $sent = [];
 
-    /** @var list<array{type: string, owner: Model|null}> */
+    /** @var list<RecordedBroadcast> */
     private array $broadcasts = [];
 
     /** @var list<OutboundDelivery> */
@@ -79,7 +82,7 @@ final class WebhooksFake extends WebhooksManager
     {
         EventTypes::assertSendable($eventType);
 
-        $this->broadcasts[] = ['type' => $eventType, 'owner' => $owner];
+        $this->broadcasts[] = new RecordedBroadcast($eventType, $owner, self::decoded($payload));
 
         return BroadcastWebhookAction::targets($eventType, $owner)
             ->map(fn (OutboundEndpoint $endpoint): OutboundDelivery => $this->record($endpoint, $eventType, $payload, true));
@@ -159,11 +162,46 @@ final class WebhooksFake extends WebhooksManager
     }
 
     /**
-     * @param  OutboundEndpoint|(Closure(SentWebhook): bool)  $endpoint
+     * Every recorded `broadcast()` call.
+     *
+     * @return Collection<int, RecordedBroadcast>
+     */
+    public function broadcasts(): Collection
+    {
+        return new Collection($this->broadcasts);
+    }
+
+    /**
+     * Every delivery handed to `redeliver()`.
+     *
+     * @return Collection<int, OutboundDelivery>
+     */
+    public function redelivered(): Collection
+    {
+        return new Collection($this->redelivered);
+    }
+
+    /**
+     * Every delivery handed to `replay()`.
+     *
+     * @return Collection<int, InboundDelivery>
+     */
+    public function replayed(): Collection
+    {
+        return new Collection($this->replayed);
+    }
+
+    /**
+     * The first argument is the endpoint, a `Closure(SentWebhook): bool`, or — when you do not hold
+     * the endpoint — the event type: `assertSent('invoice.paid', payload: fn (array $p) => …)`.
+     *
+     * @param  OutboundEndpoint|string|(Closure(SentWebhook): bool)  $endpoint
      * @param  (Closure(array<array-key, mixed>): bool)|null  $payload
      */
-    public function assertSent(OutboundEndpoint|Closure $endpoint, ?string $eventType = null, ?Closure $payload = null): void
+    public function assertSent(OutboundEndpoint|Closure|string $endpoint, ?string $eventType = null, ?Closure $payload = null): void
     {
+        $eventType = self::eventType($endpoint, $eventType);
+
         PHPUnit::assertNotEmpty(
             $this->matching($endpoint, $eventType, $payload),
             'Expected a webhook to be sent'.self::describe($eventType).', but none matched.',
@@ -171,22 +209,24 @@ final class WebhooksFake extends WebhooksManager
     }
 
     /**
-     * @param  OutboundEndpoint|(Closure(SentWebhook): bool)  $endpoint
+     * @param  OutboundEndpoint|string|(Closure(SentWebhook): bool)  $endpoint
      * @param  (Closure(array<array-key, mixed>): bool)|null  $payload
      */
-    public function assertSentTimes(int $times, OutboundEndpoint|Closure $endpoint, ?string $eventType = null, ?Closure $payload = null): void
+    public function assertSentTimes(int $times, OutboundEndpoint|Closure|string $endpoint, ?string $eventType = null, ?Closure $payload = null): void
     {
+        $eventType = self::eventType($endpoint, $eventType);
         $count = count($this->matching($endpoint, $eventType, $payload));
 
         PHPUnit::assertSame($times, $count, "Expected {$times} matching webhook(s) to be sent".self::describe($eventType).", but {$count} were.");
     }
 
     /**
-     * @param  OutboundEndpoint|(Closure(SentWebhook): bool)  $endpoint
+     * @param  OutboundEndpoint|string|(Closure(SentWebhook): bool)  $endpoint
      * @param  (Closure(array<array-key, mixed>): bool)|null  $payload
      */
-    public function assertNotSent(OutboundEndpoint|Closure $endpoint, ?string $eventType = null, ?Closure $payload = null): void
+    public function assertNotSent(OutboundEndpoint|Closure|string $endpoint, ?string $eventType = null, ?Closure $payload = null): void
     {
+        $eventType = self::eventType($endpoint, $eventType);
         $count = count($this->matching($endpoint, $eventType, $payload));
 
         PHPUnit::assertSame(0, $count, 'Expected no matching webhook to be sent'.self::describe($eventType).", but {$count} were.");
@@ -199,15 +239,38 @@ final class WebhooksFake extends WebhooksManager
         PHPUnit::assertSame(0, $count, "Expected no webhook to be sent, but {$count} were.");
     }
 
-    public function assertBroadcast(string $eventType, ?Model $owner = null): void
+    /**
+     * A `broadcast()` of the type (for the owner, when given; with a matching payload, when given).
+     *
+     * @param  (Closure(array<array-key, mixed>): bool)|null  $payload
+     */
+    public function assertBroadcast(string $eventType, ?Model $owner = null, ?Closure $payload = null): void
     {
-        $matching = array_filter(
-            $this->broadcasts,
-            static fn (array $broadcast): bool => $broadcast['type'] === $eventType
-                && ($owner === null || ($broadcast['owner'] !== null && $broadcast['owner']->is($owner))),
-        );
+        PHPUnit::assertNotEmpty($this->broadcastsOf($eventType, $owner, $payload), "Expected [{$eventType}] to be broadcast, but it was not.");
+    }
 
-        PHPUnit::assertNotEmpty($matching, "Expected [{$eventType}] to be broadcast, but it was not.");
+    /**
+     * @param  (Closure(array<array-key, mixed>): bool)|null  $payload
+     */
+    public function assertBroadcastTimes(int $times, string $eventType, ?Model $owner = null, ?Closure $payload = null): void
+    {
+        $count = count($this->broadcastsOf($eventType, $owner, $payload));
+
+        PHPUnit::assertSame($times, $count, "Expected [{$eventType}] to be broadcast {$times} time(s), but it was {$count}.");
+    }
+
+    public function assertNotBroadcast(string $eventType, ?Model $owner = null): void
+    {
+        $count = count($this->broadcastsOf($eventType, $owner, null));
+
+        PHPUnit::assertSame(0, $count, "Expected [{$eventType}] not to be broadcast, but it was {$count} time(s).");
+    }
+
+    public function assertNothingBroadcast(): void
+    {
+        $count = count($this->broadcasts);
+
+        PHPUnit::assertSame(0, $count, "Expected nothing to be broadcast, but {$count} broadcast(s) were.");
     }
 
     public function assertRedelivered(OutboundDelivery $delivery): void
@@ -218,6 +281,13 @@ final class WebhooksFake extends WebhooksManager
         );
     }
 
+    public function assertNothingRedelivered(): void
+    {
+        $count = count($this->redelivered);
+
+        PHPUnit::assertSame(0, $count, "Expected nothing to be redelivered, but {$count} redelivery(ies) were.");
+    }
+
     public function assertReplayed(InboundDelivery $delivery): void
     {
         PHPUnit::assertNotEmpty(
@@ -226,20 +296,45 @@ final class WebhooksFake extends WebhooksManager
         );
     }
 
+    public function assertNothingReplayed(): void
+    {
+        $count = count($this->replayed);
+
+        PHPUnit::assertSame(0, $count, "Expected nothing to be replayed, but {$count} replay(s) were.");
+    }
+
     public function assertSecretRotated(InboundEndpoint|OutboundEndpoint $endpoint): void
     {
-        PHPUnit::assertNotEmpty(
-            array_filter($this->rotated, static fn (Model $recorded): bool => $recorded->is($endpoint)),
-            "Expected the endpoint's secret to be rotated, but it was not.",
-        );
+        PHPUnit::assertNotEmpty(self::recorded($this->rotated, $endpoint), "Expected the endpoint's secret to be rotated, but it was not.");
+    }
+
+    public function assertSecretNotRotated(InboundEndpoint|OutboundEndpoint $endpoint): void
+    {
+        PHPUnit::assertEmpty(self::recorded($this->rotated, $endpoint), "Expected the endpoint's secret not to be rotated, but it was.");
+    }
+
+    public function assertNoSecretsRotated(): void
+    {
+        $count = count($this->rotated);
+
+        PHPUnit::assertSame(0, $count, "Expected no secret to be rotated, but {$count} were.");
     }
 
     public function assertEndpointDisabled(InboundEndpoint|OutboundEndpoint $endpoint): void
     {
-        PHPUnit::assertNotEmpty(
-            array_filter($this->disabled, static fn (Model $recorded): bool => $recorded->is($endpoint)),
-            'Expected the endpoint to be disabled, but it was not.',
-        );
+        PHPUnit::assertNotEmpty(self::recorded($this->disabled, $endpoint), 'Expected the endpoint to be disabled, but it was not.');
+    }
+
+    public function assertEndpointNotDisabled(InboundEndpoint|OutboundEndpoint $endpoint): void
+    {
+        PHPUnit::assertEmpty(self::recorded($this->disabled, $endpoint), 'Expected the endpoint not to be disabled, but it was.');
+    }
+
+    public function assertNoEndpointsDisabled(): void
+    {
+        $count = count($this->disabled);
+
+        PHPUnit::assertSame(0, $count, "Expected no endpoint to be disabled, but {$count} were.");
     }
 
     /**
@@ -251,12 +346,15 @@ final class WebhooksFake extends WebhooksManager
         $decoded = json_decode($body, true);
         $data = is_array($decoded) && WebhooksConfig::envelope() ? ($decoded['data'] ?? []) : $decoded;
 
-        $this->sent[] = new SentWebhook($endpoint, $eventType, is_array($data) ? $data : [], $body, $broadcast);
+        $publicId = (string) Str::ulid();
+        $owner = $endpoint->owner;
+
+        $this->sent[] = new SentWebhook($endpoint, $eventType, is_array($data) ? $data : [], $body, $broadcast, $owner instanceof Model ? $owner : null, OutboundDelivery::ID_PREFIX.$publicId);
 
         $class = ModelSeams::outboundDelivery();
         $delivery = new $class;
         $delivery->forceFill([
-            'public_id' => (string) Str::ulid(),
+            'public_id' => $publicId,
             'endpoint_id' => $endpoint->getKey(),
             'event_type' => $eventType,
             'body' => $body,
@@ -272,15 +370,60 @@ final class WebhooksFake extends WebhooksManager
     }
 
     /**
-     * @param  OutboundEndpoint|(Closure(SentWebhook): bool)  $endpoint
+     * @param  OutboundEndpoint|string|(Closure(SentWebhook): bool)  $endpoint  a string: any endpoint (it is the event type)
      * @param  (Closure(array<array-key, mixed>): bool)|null  $payload
      * @return list<SentWebhook>
      */
-    private function matching(OutboundEndpoint|Closure $endpoint, ?string $eventType, ?Closure $payload): array
+    private function matching(OutboundEndpoint|Closure|string $endpoint, ?string $eventType, ?Closure $payload): array
     {
-        return array_values(array_filter($this->sent, static fn (SentWebhook $sent): bool => ($endpoint instanceof Closure ? $endpoint($sent) : $sent->endpoint->is($endpoint))
+        return array_values(array_filter($this->sent, static fn (SentWebhook $sent): bool => (is_string($endpoint) || ($endpoint instanceof Closure ? $endpoint($sent) : $sent->endpoint->is($endpoint)))
             && ($eventType === null || $sent->eventType === $eventType)
             && ($payload === null || $payload($sent->payload))));
+    }
+
+    /**
+     * @param  (Closure(array<array-key, mixed>): bool)|null  $payload
+     * @return list<RecordedBroadcast>
+     */
+    private function broadcastsOf(string $eventType, ?Model $owner, ?Closure $payload): array
+    {
+        return array_values(array_filter($this->broadcasts, static fn (RecordedBroadcast $broadcast): bool => $broadcast->eventType === $eventType
+            && ($owner === null || ($broadcast->owner !== null && $broadcast->owner->is($owner)))
+            && ($payload === null || $payload($broadcast->payload))));
+    }
+
+    /**
+     * The event type to match: the first argument when it is one, else the second.
+     *
+     * @param  OutboundEndpoint|string|(Closure(SentWebhook): bool)  $endpoint
+     */
+    private static function eventType(OutboundEndpoint|Closure|string $endpoint, ?string $eventType): ?string
+    {
+        if (is_string($endpoint) && $eventType !== null) {
+            throw new InvalidArgumentException('Give the event type once: as the first argument, or after an endpoint.');
+        }
+
+        return is_string($endpoint) ? $endpoint : $eventType;
+    }
+
+    /**
+     * @param  list<Model>  $recorded
+     * @return list<Model>
+     */
+    private static function recorded(array $recorded, Model $endpoint): array
+    {
+        return array_values(array_filter($recorded, static fn (Model $model): bool => $model->is($endpoint)));
+    }
+
+    /**
+     * @param  array<array-key, mixed>|Arrayable<array-key, mixed>|JsonSerializable  $payload
+     * @return array<array-key, mixed>
+     */
+    private static function decoded(array|Arrayable|JsonSerializable $payload): array
+    {
+        $decoded = json_decode((string) json_encode($payload instanceof Arrayable ? $payload->toArray() : $payload), true);
+
+        return is_array($decoded) ? $decoded : [];
     }
 
     private static function describe(?string $eventType): string

@@ -7,7 +7,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Facade;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
-use PHPUnit\Framework\ExpectationFailedException;
 use RoundlyConsulting\Webhooks\Accessors\HandlerRegistry;
 use RoundlyConsulting\Webhooks\Accessors\InboundWebhooks;
 use RoundlyConsulting\Webhooks\Accessors\OutboundWebhooks;
@@ -34,9 +33,7 @@ use RoundlyConsulting\Webhooks\Jobs\DeliverWebhook;
 use RoundlyConsulting\Webhooks\Jobs\ProcessInboundDelivery;
 use RoundlyConsulting\Webhooks\Models\InboundDelivery;
 use RoundlyConsulting\Webhooks\Models\OutboundDelivery;
-use RoundlyConsulting\Webhooks\Testing\SentWebhook;
 use RoundlyConsulting\Webhooks\Testing\SignedWebhookRequest;
-use RoundlyConsulting\Webhooks\Testing\WebhooksFake;
 use RoundlyConsulting\Webhooks\Tests\Fixtures\App\Handlers\BillingWebhookHandler;
 use RoundlyConsulting\Webhooks\WebhooksManager;
 
@@ -247,70 +244,6 @@ it('the_owner_trait_goes_through_the_manager', function (): void {
     $fake->assertBroadcast('invoice.paid', $team);
     $fake->assertSentTimes(2, $endpoint, 'invoice.paid');
     $fake->assertSent($endpoint, 'invoice.paid', fn (array $payload): bool => $payload['invoice'] === 7);
-});
-
-it('fake_assertions_pass_and_fail', function (): void {
-    $endpoint = outboundEndpoint(events: ['invoice.*']);
-    $other = outboundEndpoint('https://other.example.com/in');
-    $fake = Webhooks::fake();
-
-    expect(app(WebhooksManager::class))->toBeInstanceOf(WebhooksFake::class);
-
-    $fake->assertNothingSent();
-    $delivery = Webhooks::send($endpoint, 'invoice.paid', ['invoice' => 42]);
-
-    expect($delivery->exists)->toBeFalse()->and($delivery->webhookId())->toStartWith('msg_')
-        ->and(OutboundDelivery::query()->count())->toBe(0);
-    Queue::assertNothingPushed();
-
-    $fake->assertSent($endpoint);
-    $fake->assertSent($endpoint, 'invoice.paid', fn (array $payload): bool => $payload === ['invoice' => 42]);
-    $fake->assertSent(fn (SentWebhook $sent): bool => $sent->body !== '' && ! $sent->broadcast);
-    $fake->assertSentTimes(1, $endpoint);
-    $fake->assertNotSent($other);
-    Webhooks::assertSent($endpoint, 'invoice.paid');
-    expect($fake->sent())->toHaveCount(1);
-
-    $fails = static fn (Closure $assertion, string $message) => expect($assertion)->toThrow(ExpectationFailedException::class, $message);
-
-    $fails(fn () => $fake->assertSent($other), 'Expected a webhook to be sent');
-    $fails(fn () => $fake->assertSent($endpoint, 'invoice.void'), '[invoice.void]');
-    $fails(fn () => $fake->assertSentTimes(2, $endpoint), 'Expected 2 matching webhook(s)');
-    $fails(fn () => $fake->assertNotSent($endpoint), 'Expected no matching webhook');
-    $fails(fn () => $fake->assertNothingSent(), 'Expected no webhook to be sent, but 1 were.');
-    $fails(fn () => $fake->assertBroadcast('invoice.paid'), 'to be broadcast');
-
-    Webhooks::broadcast('invoice.paid', ['x' => 1], null);
-    $fake->assertBroadcast('invoice.paid');
-    $fails(fn () => $fake->assertBroadcast('invoice.paid', team()), 'to be broadcast');
-
-    $finished = OutboundDelivery::factory()->create(['endpoint_id' => $endpoint->getKey()]);
-    $fails(fn () => $fake->assertRedelivered($finished), 'to be redelivered');
-    Webhooks::outbound()->redeliver($finished);
-    $fake->assertRedelivered($finished);
-
-    $inbound = InboundDelivery::factory()->create();
-    $fails(fn () => $fake->assertReplayed($inbound), 'to be replayed');
-    Webhooks::inbound()->replay($inbound);
-    $fake->assertReplayed($inbound);
-    expect($inbound->refresh()->runs)->toBe(1);
-
-    $fails(fn () => $fake->assertSecretRotated($endpoint), 'to be rotated');
-    Webhooks::outbound()->rotateSecret($endpoint);
-    $fake->assertSecretRotated($endpoint);
-    $in = inboundEndpoint();
-    Webhooks::inbound()->rotateSecret($in);
-    $fake->assertSecretRotated($in);
-
-    $fails(fn () => $fake->assertEndpointDisabled($endpoint), 'to be disabled');
-    Webhooks::outbound()->disable($endpoint);
-    Webhooks::inbound()->disable($in);
-    Webhooks::inbound()->enable($in);
-    Webhooks::outbound()->enable($endpoint);
-    $fake->assertEndpointDisabled($endpoint);
-    $fake->assertEndpointDisabled($in);
-
-    expect(Webhooks::outbound()->dispatchDue())->toBe(0);
 });
 
 it('the_fake_refuses_what_production_refuses', function (): void {

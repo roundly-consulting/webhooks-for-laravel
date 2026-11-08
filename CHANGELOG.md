@@ -44,7 +44,10 @@ Initial public release.
   `DeliverySucceeded`, `DeliveryFailed`, `EndpointDisabled`, `EndpointSecretRotated`.
 - **Commands** — `webhooks:install`, `webhooks:doctor`, `webhooks:retry`, `webhooks:prune`,
   `webhooks:rotate-secret`, `webhooks:redeliver`, `webhooks:replay`.
-- **Testing** — `Webhooks::fake()` with sent-delivery assertions, `SignedWebhookRequest` for
+- **Testing** — `Webhooks::fake()` recording sends, broadcasts, redeliveries, replays, rotations and
+  disables, each with an assertion and a negative (`assertNothingBroadcast()`,
+  `assertSecretNotRotated()`, …); `assertSent('invoice.paid', payload: …)` without the endpoint;
+  `SignedWebhookRequest` for
   correctly (or deliberately badly) signed inbound requests, `FakeHostResolver` for DNS.
 - Facade, injectable `WebhooksManager` and single-purpose actions; swappable models; bigint, uuid
   or ulid keys; English and Slovak translations.

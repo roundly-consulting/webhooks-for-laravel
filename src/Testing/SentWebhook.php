@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\Webhooks\Testing;
 
+use Illuminate\Database\Eloquent\Model;
 use RoundlyConsulting\Webhooks\Models\OutboundEndpoint;
 
 /**
@@ -20,5 +21,7 @@ final readonly class SentWebhook
         public array $payload,
         public string $body,
         public bool $broadcast,
+        public ?Model $owner,
+        public string $webhookId,
     ) {}
 }
