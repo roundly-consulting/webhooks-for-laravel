@@ -12,6 +12,7 @@ use RoundlyConsulting\Webhooks\DataTransferObjects\InboundWebhook;
 use RoundlyConsulting\Webhooks\Enums\InboundStatus;
 use RoundlyConsulting\Webhooks\Events\WebhookProcessingFailed;
 use RoundlyConsulting\Webhooks\Events\WebhookReceived;
+use RoundlyConsulting\Webhooks\Exceptions\DeliveryInProgressException;
 use RoundlyConsulting\Webhooks\Exceptions\PayloadPrunedException;
 use RoundlyConsulting\Webhooks\Exceptions\UnknownHandlerException;
 use RoundlyConsulting\Webhooks\Facades\Webhooks;
@@ -263,4 +264,35 @@ it('keeps the payload of a delivery still waiting to run, and fails a pruned one
     Event::assertNotDispatched(WebhookReceived::class);
     Event::assertDispatched(WebhookProcessingFailed::class, fn (WebhookProcessingFailed $event): bool => $event->errorCode === 'payload_pruned');
     CarbonImmutable::setTestNow();
+});
+
+it('a_replay_whose_job_cannot_be_queued_leaves_the_delivery_as_it_was', function (): void {
+    postSigned(inboundEndpoint(['handler' => 'billing']))->assertStatus(202);
+    $delivery = InboundDelivery::query()->sole();
+    $before = $delivery->only(['status', 'runs', 'queued_at']);
+    config()->set('webhooks.queue.connection', 'gone');
+
+    expect(fn () => Webhooks::inbound()->replay($delivery))->toThrow(InvalidArgumentException::class);
+
+    // Not stranded in `queued` with no job: still replayable once the queue is back.
+    expect($delivery->refresh()->only(['status', 'runs', 'queued_at']))->toEqual($before);
+    config()->set('webhooks.queue.connection', null);
+    expect(Webhooks::inbound()->replay($delivery)->runs)->toBe(2);
+});
+
+it('a_run_stuck_in_processing_past_its_time_budget_can_be_replayed', function (): void {
+    Queue::fake();
+    postSigned(inboundEndpoint(['handler' => 'billing']))->assertStatus(202);
+    $delivery = InboundDelivery::query()->sole();
+    $delivery->forceFill(['status' => InboundStatus::Processing, 'processing_started_at' => CarbonImmutable::now()->subMinutes(2)])->save();
+
+    // Still within the handler's timeout and backoff: in progress.
+    expect(fn () => Webhooks::inbound()->replay($delivery))->toThrow(DeliveryInProgressException::class);
+
+    // Its worker died long ago and nothing will ever finish the run.
+    $delivery->forceFill(['processing_started_at' => CarbonImmutable::now()->subHour()])->save();
+    $replayed = Webhooks::inbound()->replay($delivery);
+
+    expect($replayed->runs)->toBe(2)->and($replayed->status)->toBe(InboundStatus::Queued)->and($replayed->queued_at)->not->toBeNull();
+    Queue::assertPushed(ProcessInboundDelivery::class, fn (ProcessInboundDelivery $job): bool => $job->replay && $job->run === 2);
 });
