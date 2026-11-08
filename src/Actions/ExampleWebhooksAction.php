@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace RoundlyConsulting\PackageTemplate\Actions;
+namespace RoundlyConsulting\Webhooks\Actions;
 
-use RoundlyConsulting\PackageTemplate\DataTransferObjects\ExamplePackageTemplateData;
+use RoundlyConsulting\Webhooks\DataTransferObjects\ExampleWebhooksData;
 
 /**
  * REPLACE ME — a placeholder action showing the shape every use case takes.
@@ -18,9 +18,9 @@ use RoundlyConsulting\PackageTemplate\DataTransferObjects\ExamplePackageTemplate
  * A building block only other actions call carries `@internal` in this docblock and is not
  * exposed on the facade — `toReachEveryAction()` in FacadeTest enforces the difference.
  */
-final readonly class ExamplePackageTemplateAction
+final readonly class ExampleWebhooksAction
 {
-    public function execute(ExamplePackageTemplateData $data): string
+    public function execute(ExampleWebhooksData $data): string
     {
         return 'Hello, '.$data->name.'!';
     }

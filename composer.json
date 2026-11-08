@@ -1,11 +1,17 @@
 {
-    "name": "roundly-consulting/package-template-for-laravel",
-    "description": "TODO: replace with a one-line description of the new package.",
+    "name": "roundly-consulting/webhooks-for-laravel",
+    "description": "Receive and send signed webhooks in Laravel: verified per-sender endpoints with replay protection and queued handlers, retried and throttled deliveries, secret rotation, an SSRF guard and a delivery log.",
     "keywords": [
-        "roundly-consulting",
-        "laravel"
+        "webhooks",
+        "webhook-signature",
+        "hmac",
+        "standard-webhooks",
+        "rfc9421",
+        "ssrf",
+        "retries",
+        "delivery-log"
     ],
-    "homepage": "https://roundly-consulting.com/open-source/docs/package-template-for-laravel",
+    "homepage": "https://roundly-consulting.com/open-source/docs/webhooks-for-laravel",
     "license": "MIT",
     "authors": [
         {
@@ -15,12 +21,31 @@
         }
     ],
     "support": {
-        "docs": "https://roundly-consulting.com/open-source/docs/package-template-for-laravel"
+        "docs": "https://roundly-consulting.com/open-source/docs/webhooks-for-laravel"
     },
     "require": {
         "php": "^8.4",
+        "ext-curl": "*",
+        "ext-json": "*",
+        "illuminate/bus": "^13.0",
+        "illuminate/cache": "^13.0",
+        "illuminate/console": "^13.0",
         "illuminate/contracts": "^13.0",
-        "roundly-consulting/package-toolkit-for-laravel": "^2.0"
+        "illuminate/database": "^13.0",
+        "illuminate/encryption": "^13.0",
+        "illuminate/events": "^13.0",
+        "illuminate/http": "^13.0",
+        "illuminate/queue": "^13.0",
+        "illuminate/routing": "^13.0",
+        "illuminate/support": "^13.0",
+        "illuminate/translation": "^13.0",
+        "illuminate/validation": "^13.0",
+        "roundly-consulting/crypto-for-laravel": "^2.1",
+        "roundly-consulting/enums-for-laravel": "^2.0",
+        "roundly-consulting/http-client-rate-limits-for-laravel": "^2.0",
+        "roundly-consulting/package-toolkit-for-laravel": "^2.0",
+        "roundly-consulting/safe-fetch-for-laravel": "@dev",
+        "roundly-consulting/sentinel-for-laravel": "^2.1"
     },
     "require-dev": {
         "larastan/larastan": "^3.0",
@@ -33,14 +58,18 @@
         "phpstan/extension-installer": "^1.4",
         "roundly-consulting/testing-for-laravel": "^2.0"
     },
+    "suggest": {
+        "ext-intl": "International (IDN) webhook host names; without it they are refused."
+    },
     "autoload": {
         "psr-4": {
-            "RoundlyConsulting\\PackageTemplate\\": "src"
+            "RoundlyConsulting\\Webhooks\\": "src",
+            "RoundlyConsulting\\Webhooks\\Database\\Factories\\": "database/factories"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "RoundlyConsulting\\PackageTemplate\\Tests\\": "tests"
+            "RoundlyConsulting\\Webhooks\\Tests\\": "tests"
         }
     },
     "scripts": {
@@ -48,7 +77,7 @@
         "format": "vendor/bin/pint",
         "analyse": "vendor/bin/phpstan analyse --no-progress",
         "test": "vendor/bin/pest",
-        "test-coverage": "vendor/bin/pest --coverage --min=90"
+        "test-coverage": "vendor/bin/pest --coverage --min=95"
     },
     "config": {
         "sort-packages": true,
@@ -60,11 +89,27 @@
     "extra": {
         "laravel": {
             "providers": [
-                "RoundlyConsulting\\PackageTemplate\\PackageTemplateServiceProvider"
+                "RoundlyConsulting\\Webhooks\\WebhooksServiceProvider"
             ],
             "aliases": {
-                "PackageTemplate": "RoundlyConsulting\\PackageTemplate\\Facades\\PackageTemplate"
+                "Webhooks": "RoundlyConsulting\\Webhooks\\Facades\\Webhooks"
             }
         }
-    }
+    },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../safe-fetch-for-laravel*",
+            "options": {
+                "symlink": true
+            }
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/roundly-consulting/safe-fetch-for-laravel",
+            "no-api": true
+        }
+    ],
+    "minimum-stability": "dev",
+    "prefer-stable": true
 }
