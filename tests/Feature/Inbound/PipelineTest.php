@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
 use RoundlyConsulting\Crypto\Facades\Crypto;
+use RoundlyConsulting\Sentinel\Contracts\IdempotencyStore;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Webhooks\Contracts\PayloadSanitizer;
@@ -36,6 +37,7 @@ use RoundlyConsulting\Webhooks\Schemes\EndpointSecrets;
 use RoundlyConsulting\Webhooks\Support\KeyRedactingSanitizer;
 use RoundlyConsulting\Webhooks\Support\MacEngine;
 use RoundlyConsulting\Webhooks\Testing\SignedWebhookRequest;
+use RoundlyConsulting\Webhooks\Tests\Support\FlakyIdempotencyStore;
 
 beforeEach(function (): void {
     Queue::fake();
@@ -488,4 +490,47 @@ it('accepted_delivery_round_trips_through_the_idempotency_store', function (): v
         ->and(AcceptedDelivery::fromStored($second->value, $second->replayed))->toEqual(new AcceptedDelivery($accepted->id, true))
         ->and(AcceptedDelivery::fromStored('garbage'))->toEqual(new AcceptedDelivery('', false))
         ->and(AcceptedDelivery::fromStored(['id' => 7, 'duplicate' => 'yes']))->toEqual(new AcceptedDelivery('', false));
+});
+
+it('answers success when the idempotency store fails after the delivery was stored', function (bool $unsigned, int $failOn): void {
+    app()->instance(IdempotencyStore::class, new FlakyIdempotencyStore(app(IdempotencyStore::class), $failOn));
+    $endpoint = inboundEndpoint();
+
+    if ($unsigned) {
+        unsignedScheme();
+        $endpoint->forceFill(['signature_scheme' => 'unsigned'])->save();
+    }
+
+    $send = fn () => SignedWebhookRequest::for($endpoint)->id('msg_kept')->withHeader('X-Delivery', 'msg_kept')
+        ->signUsing(fn (OutgoingWebhook $message, EndpointSecrets $secrets) => (new DefaultScheme)->sign($message, $secrets))->send();
+
+    // Stored and queued, but its result could not be kept: still the sender's success…
+    $send()->assertStatus(202)->assertJson(['status' => 'accepted', 'id' => InboundDelivery::query()->sole()->public_id]);
+    // …and its retry a duplicate, not a 409 for the key's whole TTL.
+    $send()->assertStatus(200)->assertJson(['status' => 'duplicate']);
+
+    expect(InboundDelivery::query()->count())->toBe(1);
+})->with([
+    'signed id' => [false, 1],
+    'unsigned id, the id run' => [true, 1],
+    'unsigned id, the body guard' => [true, 2],
+]);
+
+it('keeps refusing a retry whose unkept delivery is gone', function (): void {
+    app()->instance(IdempotencyStore::class, new FlakyIdempotencyStore(app(IdempotencyStore::class)));
+    $endpoint = inboundEndpoint();
+
+    SignedWebhookRequest::for($endpoint)->id('msg_gone')->send()->assertStatus(202);
+    InboundDelivery::query()->forceDelete();
+
+    // The key is completed as unreplayable and no delivery backs it: sentinel's 409 stands.
+    SignedWebhookRequest::for($endpoint)->id('msg_gone')->send()->assertStatus(409);
+});
+
+it('lets a store failure before anything was stored surface', function (): void {
+    app()->instance(IdempotencyStore::class, new FlakyIdempotencyStore(app(IdempotencyStore::class), failOn: 0));
+    $this->withoutExceptionHandling();
+
+    expect(fn () => SignedWebhookRequest::for(inboundEndpoint())->send())->toThrow(RuntimeException::class, 'unavailable');
+    expect(InboundDelivery::query()->count())->toBe(0);
 });

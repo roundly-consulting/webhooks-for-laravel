@@ -93,6 +93,11 @@ final readonly class AcceptInboundDeliveryAction
         return new AcceptedDelivery($delivery->public_id, false);
     }
 
+    public function isStored(InboundEndpoint $endpoint, string $idempotencyKey): bool
+    {
+        return $this->stored($endpoint, $idempotencyKey) !== null;
+    }
+
     private function stored(InboundEndpoint $endpoint, string $idempotencyKey): ?InboundDelivery
     {
         return ModelSeams::inboundDelivery()::query()

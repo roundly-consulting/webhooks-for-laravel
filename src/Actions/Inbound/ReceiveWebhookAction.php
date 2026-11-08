@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\Webhooks\Actions\Inbound;
 
+use Closure;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Http\Request;
 use JsonException;
@@ -11,6 +12,7 @@ use RoundlyConsulting\Crypto\Facades\Crypto;
 use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentResult;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyKeyReusedException;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyRequestInProgressException;
+use RoundlyConsulting\Sentinel\Exceptions\IdempotentResponseUnavailableException;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Webhooks\DataTransferObjects\AcceptedDelivery;
 use RoundlyConsulting\Webhooks\DataTransferObjects\VerifiedWebhook;
@@ -28,6 +30,7 @@ use RoundlyConsulting\Webhooks\Support\ModelSeams;
 use RoundlyConsulting\Webhooks\Support\UrlKeys;
 use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 /**
  * The inbound pipeline, in a fixed order — the first failure wins, and none of them stores or
@@ -134,6 +137,14 @@ final readonly class ReceiveWebhookAction
             return Problem::response(RejectionReason::InProgress, ['Retry-After' => '1']);
         } catch (PayloadSanitizerException) {
             return Problem::response(RejectionReason::SanitizerFailed);
+        } catch (IdempotentResponseUnavailableException $exception) {
+            // An earlier request stored the delivery but the store could not keep its result:
+            // the retry is a duplicate when the delivery is there.
+            if (! $this->accept->isStored($endpoint, $idempotencyKey)) {
+                throw $exception;
+            }
+
+            return $this->duplicate();
         }
 
         if ($result->duplicate) {
@@ -161,9 +172,35 @@ final readonly class ReceiveWebhookAction
         $digest = Crypto::digest()->hex($body);
         $scope = 'webhooks:in:'.Keys::of($endpoint);
         $ttl = WebhooksConfig::dedupeTtl();
+        $stored = null;
         // The store keeps plain arrays: converted at this boundary, both ways.
-        $accept = fn (): array => $this->accept->execute($endpoint, $verified, $idempotencyKey, $payload, $headers, $body)->toStored();
+        $accept = function () use ($endpoint, $verified, $idempotencyKey, $payload, $headers, $body, &$stored): array {
+            $stored = $this->accept->execute($endpoint, $verified, $idempotencyKey, $payload, $headers, $body);
+
+            return $stored->toStored();
+        };
         $run = fn (): array => self::outcome($this->sentinel->idempotency()->run($idempotencyKey, $scope, $accept, $digest, $ttl))->toStored();
+
+        try {
+            return $this->guarded($endpoint, $verified, $run, $digest, $scope, $ttl);
+        } catch (Throwable $exception) {
+            // Stored and queued by this request, then the idempotency store failed to keep the
+            // result: the delivery is accepted all the same (a retry is a duplicate).
+            if (! $stored instanceof AcceptedDelivery || $stored->duplicate) {
+                throw $exception;
+            }
+
+            report($exception);
+
+            return $stored;
+        }
+    }
+
+    /**
+     * @param  Closure(): array<string, mixed>  $run
+     */
+    private function guarded(InboundEndpoint $endpoint, VerifiedWebhook $verified, Closure $run, string $digest, string $scope, int $ttl): AcceptedDelivery
+    {
 
         // Signed only when the scheme supplied the id: an id-less verdict falls back to the
         // unsigned `Idempotency-Key`, whatever the scheme claims.
