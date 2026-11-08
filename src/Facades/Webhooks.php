@@ -48,12 +48,14 @@ final class Webhooks extends Facade
 {
     /**
      * Swap the manager for a recording fake — behind the facade and in the container, so an
-     * injected WebhooksManager is faked too.
+     * injected WebhooksManager is faked too. It survives a scope reset (a `queue:work` run inside
+     * the test forgets scoped instances before every job): the binding itself hands out the fake.
      */
     public static function fake(): WebhooksFake
     {
         $fake = app(WebhooksFake::class);
 
+        app()->scoped(WebhooksManager::class, static fn (): WebhooksFake => $fake);
         self::swap($fake);
 
         return $fake;

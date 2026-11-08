@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Facade;
 use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\ExpectationFailedException;
 use RoundlyConsulting\Webhooks\Facades\Webhooks;
@@ -227,4 +228,18 @@ it('fake_disable_assertions_pass_and_fail', function (): void {
     fails(fn () => $fake->assertEndpointNotDisabled($out), 'not to be disabled');
     fails(fn () => $fake->assertNoEndpointsDisabled(), 'Expected no endpoint to be disabled, but 2 were.');
     expect(Webhooks::outbound()->dispatchDue())->toBe(0);
+});
+
+it('fake_survives_or_documents_scope_reset', function (): void {
+    $fake = Webhooks::fake();
+
+    // What a queue worker does before every job (Octane between requests).
+    app()->forgetScopedInstances();
+    Facade::clearResolvedInstances();
+
+    expect(Webhooks::getFacadeRoot())->toBe($fake)
+        ->and(app(WebhooksManager::class))->toBe($fake);
+
+    Webhooks::send(outboundEndpoint(), 'invoice.paid', []);
+    $fake->assertSent('invoice.paid');
 });
