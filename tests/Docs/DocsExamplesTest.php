@@ -19,13 +19,19 @@ use RoundlyConsulting\Webhooks\Actions\Inbound\ReceiveWebhookAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\RedeliverWebhookAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\SendWebhookAction;
 use RoundlyConsulting\Webhooks\Contracts\InboundHandler;
+use RoundlyConsulting\Webhooks\DataTransferObjects\InboundEndpointChanges;
 use RoundlyConsulting\Webhooks\DataTransferObjects\InboundEndpointOptions;
 use RoundlyConsulting\Webhooks\DataTransferObjects\InboundWebhook;
+use RoundlyConsulting\Webhooks\DataTransferObjects\OutboundEndpointChanges;
 use RoundlyConsulting\Webhooks\DataTransferObjects\OutboundEndpointOptions;
+use RoundlyConsulting\Webhooks\DataTransferObjects\PruneOptions;
 use RoundlyConsulting\Webhooks\Enums\InboundStatus;
 use RoundlyConsulting\Webhooks\Enums\OutboundStatus;
 use RoundlyConsulting\Webhooks\Events\WebhookReceived;
 use RoundlyConsulting\Webhooks\Facades\Webhooks;
+use RoundlyConsulting\Webhooks\Http\Resources\InboundDeliveryResource;
+use RoundlyConsulting\Webhooks\Http\Resources\InboundEndpointResource;
+use RoundlyConsulting\Webhooks\Http\Resources\OutboundAttemptResource;
 use RoundlyConsulting\Webhooks\Jobs\ProcessInboundDelivery;
 use RoundlyConsulting\Webhooks\Models\InboundDelivery;
 use RoundlyConsulting\Webhooks\Models\InboundEndpoint;
@@ -241,6 +247,76 @@ it('runs the outbound examples', function (): void {
     expect($result->queued)->toBe(1)->and($result->skippedPruned)->toBe(0);
 });
 
+it('runs the inbound endpoint management example', function (): void {
+    Webhooks::handlers()->register('billing', BillingWebhookHandler::class);
+    $team = team();
+    $id = Webhooks::for($team)->inbound()->create()->endpoint->getKey();
+
+    // docs: endpoints.md #0
+    $endpoint = Webhooks::for($team)->inbound()->find($id);   // another owner's id: EndpointNotFoundException
+    Webhooks::for($team)->inbound()->endpoints();               // every endpoint of $team, owner eager-loaded
+
+    Webhooks::inbound()->update($endpoint, new InboundEndpointChanges(
+        name: 'Billing provider',
+        handler: 'billing',
+        options: new InboundEndpointOptions(rateLimitPerMinute: 120, toleranceSeconds: 60),
+    ));
+    Webhooks::inbound()->update($endpoint, new InboundEndpointChanges(clear: ['rate_limit_per_minute', 'tolerance_seconds']));   // back to the config defaults
+
+    Webhooks::inbound()->disable($endpoint);   // the URL answers 404 until it is enabled again
+    Webhooks::inbound()->enable($endpoint);
+    Webhooks::inbound()->delete($endpoint);    // secrets wiped at once, the URL answers 404
+    // end docs
+
+    expect($endpoint->refresh()->trashed())->toBeTrue()
+        ->and($endpoint->name)->toBe('Billing provider')
+        ->and($endpoint->handler)->toBe('billing')
+        ->and($endpoint->rate_limit_per_minute)->toBeNull()
+        ->and($endpoint->secret)->toBeNull();
+});
+
+it('runs the outbound endpoint management example', function (): void {
+    $team = team();
+    $id = Webhooks::for($team)->outbound()->create('https://hooks.example.com/in')->endpoint->getKey();
+
+    // docs: endpoints.md #1
+    $endpoint = Webhooks::for($team)->outbound()->find($id);
+
+    Webhooks::outbound()->update($endpoint, new OutboundEndpointChanges(
+        url: 'https://hooks.example.com/v2',            // judged by the SSRF guard again
+        events: ['invoice.*', 'customer.created'],
+        headers: ['X-Tenant' => 'acme'],                 // replaces the custom headers
+        options: new OutboundEndpointOptions(rateLimitPerMinute: 10, description: 'ERP sync'),
+    ));
+    Webhooks::outbound()->update($endpoint, new OutboundEndpointChanges(clear: ['headers', 'rate_limit_per_minute']));
+
+    Webhooks::outbound()->disable($endpoint);   // EndpointDisabled (manual); pending deliveries are cancelled
+    Webhooks::outbound()->enable($endpoint);    // the failure counter starts again from 0
+    Webhooks::outbound()->delete($endpoint);    // secrets, URL and custom headers wiped at once
+    // end docs
+
+    $endpoint->refresh();
+    expect($endpoint->trashed())->toBeTrue()
+        ->and($endpoint->event_types)->toBe(['invoice.*', 'customer.created'])
+        ->and($endpoint->description)->toBe('ERP sync')
+        ->and($endpoint->rate_limit_per_minute)->toBeNull()
+        ->and($endpoint->subscribesTo('invoice.paid'))->toBeTrue()
+        ->and($endpoint->subscribesTo('invoice'))->toBeFalse();
+});
+
+it('runs the owner trait example', function (): void {
+    $team = team();
+
+    // docs: endpoints.md #3
+    $team->webhooks()->outbound()->create('https://hooks.example.com/in', events: ['invoice.*']);   // = Webhooks::for($team)
+    $team->outboundWebhookEndpoints()->where('enabled', true)->get();                                // MorphMany relations
+    $team->inboundWebhookEndpoints()->count();
+    $team->broadcastWebhook('invoice.paid', ['invoice' => 42]);
+    // end docs
+
+    expect(OutboundDelivery::query()->count())->toBe(1);
+});
+
 it('runs the events examples', function (): void {
     // docs: events.md #0
     Event::listen(function (WebhookReceived $event): void {
@@ -269,6 +345,34 @@ it('runs the delivery-log examples', function (): void {
     // end docs
 
     expect(Webhooks::outbound()->attempts($delivery))->toHaveCount(0);
+});
+
+it('runs the resources example', function (): void {
+    $team = team();
+    Webhooks::for($team)->inbound()->create();
+    $inboundDelivery = InboundDelivery::factory()->create();
+    $outboundDelivery = OutboundDelivery::factory()->create();
+
+    // docs: delivery-log.md #2
+    $endpoints = InboundEndpointResource::collection(Webhooks::for($team)->inbound()->endpoints());   // owner eager-loaded
+    $delivery = InboundDeliveryResource::make($inboundDelivery)->withPayload();                        // + the sanitized payload
+    $attempts = OutboundAttemptResource::collection(Webhooks::outbound()->attempts($outboundDelivery));
+    // end docs
+
+    $json = $endpoints->response()->getContent();
+    expect($json)->toContain('"type":"Team"')->not->toContain('\\\\')
+        ->and($delivery->resolve(request()))->toHaveKey('payload');
+});
+
+it('runs the prune example', function (): void {
+    // docs: payloads.md #1
+    $result = Webhooks::prune(new PruneOptions(dryRun: true));   // counts only, changes nothing
+
+    $result->total();
+    $result->inboundPayloads;     // also: outboundBodies, attemptBodies, inboundDeliveries, outboundDeliveries, attempts, expiredSecrets, endpoints
+    // end docs
+
+    expect($result->dryRun)->toBeTrue();
 });
 
 it('runs the secrets examples', function (): void {
