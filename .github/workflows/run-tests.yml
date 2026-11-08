@@ -3,11 +3,7 @@ name: run-tests
 on:
   workflow_dispatch:
 
-# safe-fetch-for-laravel is not on Packagist yet: composer clones it from the private repo with the
-# repository secret PRIVATE_REPOS_TOKEN (a read-only `Contents` PAT on that repo). Both the env and
-# the secret go the day safe-fetch publishes and the require becomes "^1.0".
 env:
-  COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets.PRIVATE_REPOS_TOKEN }}"}}'
   # The real-network tests (php -S + real curl) prove the pinning options pass Guzzle's
   # CurlFactory; on CI a skip is a failure.
   WEBHOOKS_REQUIRE_NETWORK_TESTS: 1

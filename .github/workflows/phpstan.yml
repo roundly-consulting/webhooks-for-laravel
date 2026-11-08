@@ -3,11 +3,6 @@ name: phpstan
 on:
   workflow_dispatch:
 
-# safe-fetch-for-laravel is not on Packagist yet: cloned from its private repo with the repository
-# secret PRIVATE_REPOS_TOKEN. Goes when safe-fetch publishes.
-env:
-  COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets.PRIVATE_REPOS_TOKEN }}"}}'
-
 jobs:
   phpstan:
     name: phpstan (P${{ matrix.php }})
