@@ -213,7 +213,8 @@ final readonly class ReceiveWebhookAction
 
     /**
      * An RFC 9421 nonce seen before is a duplicate only when its delivery is stored — sentinel
-     * remembers a nonce as soon as the signature verifies, before any later step.
+     * remembers a nonce as soon as the signature verifies, before any later step. The delivery
+     * may be stored under its id header, its `Idempotency-Key` or (neither sent) its nonce.
      */
     private function replayOfStored(InboundEndpoint $endpoint, Request $request): bool
     {
@@ -222,12 +223,29 @@ final readonly class ReceiveWebhookAction
         $keys = array_filter([
             self::normalised(is_string($header) ? $request->headers->get($header) : null),
             self::normalised(self::headerKey($request)),
+            ...array_map(static fn (string $nonce): ?string => self::normalised('nonce:'.$nonce), self::nonces($request)),
         ]);
 
         return $keys !== [] && ModelSeams::inboundDelivery()::query()
             ->where('endpoint_id', Keys::of($endpoint))
             ->whereIn('idempotency_key', array_values($keys))
             ->exists();
+    }
+
+    /**
+     * The `nonce` parameters of a request's `Signature-Input` (RFC 9651 strings, unescaped).
+     *
+     * @return list<string>
+     */
+    private static function nonces(Request $request): array
+    {
+        $input = $request->headers->get('Signature-Input');
+
+        if (! is_string($input) || preg_match_all('/;\s*nonce="((?:[^"\\\\]|\\\\.)*)"/', $input, $matches) < 1) {
+            return [];
+        }
+
+        return array_map(static fn (string $nonce): string => (string) preg_replace('/\\\\(.)/', '$1', $nonce), $matches[1]);
     }
 
     /**

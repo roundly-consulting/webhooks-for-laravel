@@ -166,3 +166,20 @@ it('signs the query of an outbound RFC 9421 delivery so a default-profile receiv
     expect($verified->components)->toContain('@query')
         ->and($sent->header('Signature-Input')[0])->toContain('"@query"');
 });
+
+it('answers a resend of a stored nonce-keyed RFC 9421 delivery as a duplicate', function (): void {
+    $endpoint = rfc9421Endpoint(options: ['id_header' => 'x-none']);
+    $signed = SignedWebhookRequest::for($endpoint)->keyId('partner')->toRequest();
+    $server = ['CONTENT_TYPE' => 'application/json'];
+
+    foreach ($signed->headers as $name => $value) {
+        $server[strtoupper(str_replace('-', '_', $name)) === 'CONTENT_TYPE' ? 'CONTENT_TYPE' : 'HTTP_'.strtoupper(str_replace('-', '_', $name))] = $value;
+    }
+
+    $this->call('POST', $signed->uri, [], [], [], $server, $signed->body)->assertStatus(202);
+    // No id header and no Idempotency-Key: the delivery is stored under its nonce, so the
+    // sender's resend after a lost 202 is a duplicate, not a 401.
+    $this->call('POST', $signed->uri, [], [], [], $server, $signed->body)->assertStatus(200)->assertJson(['status' => 'duplicate']);
+
+    expect(InboundDelivery::query()->sole()->idempotency_key)->toStartWith('nonce:');
+});
