@@ -51,6 +51,21 @@ final class ProcessInboundDelivery implements ShouldQueue
         return [new Idempotent("webhooks:in:{$this->deliveryId}:run:{$this->run}", scope: 'webhooks', lease: $this->timeout + 30)];
     }
 
+    /**
+     * Horizon tags: the package, the delivery, the run.
+     *
+     * @return list<string>
+     */
+    public function tags(): array
+    {
+        return ['webhooks', 'webhooks:inbound', "webhooks:delivery:{$this->deliveryId}", "webhooks:run:{$this->run}"];
+    }
+
+    public function displayName(): string
+    {
+        return $this->replay ? 'webhooks: replay' : 'webhooks: process';
+    }
+
     public function handle(ProcessInboundDeliveryAction $action): void
     {
         $action->execute($this->deliveryId, $this->run, $this->replay, $this->attempts());

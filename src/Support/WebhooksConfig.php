@@ -321,6 +321,11 @@ final class WebhooksConfig
         return Config::integer('webhooks.outbound.requeue_after', 120, min: 1);
     }
 
+    public static function sweepBatch(): int
+    {
+        return Config::integer('webhooks.outbound.sweep_batch', 1000, min: 1, max: 100000);
+    }
+
     public static function disableAfter(): int
     {
         return Config::integer('webhooks.outbound.disable_after', 5, min: 1);

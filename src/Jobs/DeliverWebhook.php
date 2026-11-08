@@ -51,6 +51,21 @@ final class DeliverWebhook implements ShouldQueue
         ];
     }
 
+    /**
+     * Horizon tags: the package, the delivery. (The endpoint would cost a query per dispatch.)
+     *
+     * @return list<string>
+     */
+    public function tags(): array
+    {
+        return ['webhooks', 'webhooks:outbound', "webhooks:delivery:{$this->deliveryId}"];
+    }
+
+    public function displayName(): string
+    {
+        return 'webhooks: deliver';
+    }
+
     public function handle(AttemptDeliveryAction $action): void
     {
         $action->execute($this->deliveryId, $this->dispatchToken, $this);

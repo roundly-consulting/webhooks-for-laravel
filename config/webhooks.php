@@ -153,6 +153,8 @@ return [
         ],
         // A due delivery whose queued job is this many seconds late is queued again by the sweep.
         'requeue_after' => 120,
+        // The most outbound jobs one sweep run dispatches (a post-outage backlog drains over runs).
+        'sweep_batch' => 1000,
         // Failed deliveries in a row before an endpoint is disabled.
         'disable_after' => 5,
         // A 410 Gone answer disables the endpoint at once.

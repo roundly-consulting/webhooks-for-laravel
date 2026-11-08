@@ -24,8 +24,9 @@ use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
  *  - attempts whose worker died (an expired claim): recorded as `worker_lost`, then retried;
  *  - inbound deliveries stored but never queued.
  *
- * A row whose short-delay job is merely a few seconds late is left alone. Returns how many jobs
- * were dispatched.
+ * A row whose short-delay job is merely a few seconds late is left alone. At most
+ * `outbound.sweep_batch` outbound jobs per run — a post-outage backlog drains over several runs.
+ * Returns how many jobs were dispatched.
  */
 final readonly class DispatchDueDeliveriesAction
 {
@@ -48,6 +49,7 @@ final readonly class DispatchDueDeliveriesAction
     {
         $now = Clock::now();
         $stale = Clock::format($now->subSeconds(WebhooksConfig::outboundRequeueAfter()));
+        $batch = WebhooksConfig::sweepBatch();
         $count = 0;
 
         ModelSeams::outboundDelivery()::query()
@@ -58,11 +60,17 @@ final readonly class DispatchDueDeliveriesAction
                 ->orWhere(static fn (Builder $lost) => $lost->whereNotNull('dispatch_token')
                     ->where('dispatched_at', '<=', $stale)
                     ->where(static fn (Builder $at) => $at->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', $stale))))
-            ->chunkById(self::CHUNK, function ($deliveries) use (&$count): void {
+            ->chunkById(min(self::CHUNK, $batch), function ($deliveries) use (&$count, $batch): bool {
                 foreach ($deliveries as $delivery) {
+                    if ($count >= $batch) {
+                        return false;
+                    }
+
                     $this->queues->outbound($delivery);
                     $count++;
                 }
+
+                return $count < $batch;
             });
 
         return $count;

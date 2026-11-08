@@ -31,6 +31,7 @@ use RoundlyConsulting\Webhooks\Exceptions\PayloadPrunedException;
 use RoundlyConsulting\Webhooks\Exceptions\PayloadTooLargeException;
 use RoundlyConsulting\Webhooks\Facades\Webhooks;
 use RoundlyConsulting\Webhooks\Jobs\DeliverWebhook;
+use RoundlyConsulting\Webhooks\Jobs\ProcessInboundDelivery;
 use RoundlyConsulting\Webhooks\Models\OutboundAttempt;
 use RoundlyConsulting\Webhooks\Models\OutboundDelivery;
 use RoundlyConsulting\Webhooks\Support\Backoff;
@@ -510,4 +511,28 @@ it('a_configured_user_agent_wins', function (): void {
     attempt(Webhooks::send(outboundEndpoint(), 'invoice.paid', []));
 
     Http::assertSent(fn (ClientRequest $request): bool => $request->header('User-Agent') === ['Acme-Hooks/2.0 (+https://acme.test/webhooks)']);
+});
+
+it('sweep_dispatches_at_most_the_batch', function (): void {
+    config()->set('webhooks.outbound.sweep_batch', 3);
+    $endpoint = outboundEndpoint();
+    OutboundDelivery::factory()->count(5)->status(OutboundStatus::Retrying)->create(['endpoint_id' => $endpoint->getKey(), 'next_attempt_at' => CarbonImmutable::now()->subMinute(), 'dispatch_token' => null]);
+
+    expect(Webhooks::outbound()->dispatchDue())->toBe(3)
+        ->and(OutboundDelivery::query()->whereNull('dispatch_token')->count())->toBe(2)
+        // The next run takes the rest.
+        ->and(Webhooks::outbound()->dispatchDue())->toBe(2)
+        ->and(Webhooks::outbound()->dispatchDue())->toBe(0);
+    Queue::assertPushed(DeliverWebhook::class, 5);
+});
+
+it('jobs_expose_horizon_tags', function (): void {
+    $deliver = new DeliverWebhook(7, 'token');
+    $process = new ProcessInboundDelivery(9, run: 2, replay: true);
+
+    expect($deliver->tags())->toBe(['webhooks', 'webhooks:outbound', 'webhooks:delivery:7'])
+        ->and($deliver->displayName())->toBe('webhooks: deliver')
+        ->and($process->tags())->toBe(['webhooks', 'webhooks:inbound', 'webhooks:delivery:9', 'webhooks:run:2'])
+        ->and($process->displayName())->toBe('webhooks: replay')
+        ->and((new ProcessInboundDelivery(9))->displayName())->toBe('webhooks: process');
 });

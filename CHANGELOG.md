@@ -60,5 +60,7 @@ Initial public release.
   `SignedWebhookRequest` for correctly (or deliberately badly — tampered, stale, unsigned, a
   header dropped) signed inbound requests under any scheme (its own `sign()`, or `signUsing()`),
   `FakeHostResolver` for DNS.
+- Queue-friendly jobs: Horizon tags (`webhooks`, `webhooks:delivery:{id}`) and display names; the
+  sweep dispatches at most `outbound.sweep_batch` jobs per run.
 - Facade, injectable `WebhooksManager` and single-purpose actions; swappable models; bigint, uuid
   or ulid keys; English and Slovak translations.
