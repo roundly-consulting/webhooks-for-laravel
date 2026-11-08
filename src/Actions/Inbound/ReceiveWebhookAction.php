@@ -35,12 +35,14 @@ use Symfony\Component\HttpFoundation\Response;
  *
  *  1. key shape (404) · 2. endpoint lookup — unknown, deleted and disabled all 404 ·
  *  3. rejection guard per endpoint + IP (429) · 4. size (413) · 5. content type (415) ·
- *  6. signature + timestamp (401) · 6b. per-endpoint limit on verified deliveries (429) ·
- *  7. JSON decode, arrays only (400) · 8. replay / idempotency (200 duplicate or 409) ·
- *  9. store + queue → 202.
+ *  5b. per-endpoint limit on verified deliveries (429 — checked here, spent only by a verified
+ *  delivery) · 6. signature + timestamp (401) · 7. JSON decode, arrays only (400) ·
+ *  8. replay / idempotency (200 duplicate or 409) · 9. store + queue → 202.
  *
  * Size and content type run before the signature, so an unauthenticated caller cannot make the
- * app compute MACs over megabytes. Processing never happens here — only on the queue.
+ * app compute MACs over megabytes. The delivery limit runs before it too: a signature verified
+ * and then refused would have used up its RFC 9421 nonce, and the sender's retry would be
+ * refused as a replay. Processing never happens here — only on the queue.
  */
 final readonly class ReceiveWebhookAction
 {
@@ -93,6 +95,12 @@ final readonly class ReceiveWebhookAction
             return $this->refuse($endpoint, $request, RejectionReason::UnsupportedContentType);
         }
 
+        $wait = $this->limiter->deliveriesExhausted(Keys::of($endpoint), $endpoint->rate_limit_per_minute ?? WebhooksConfig::inboundRateLimit());
+
+        if ($wait !== null) {
+            return $this->rateLimited($endpoint, $request, 'del:'.Keys::of($endpoint), $wait);
+        }
+
         try {
             $verified = $this->verify->execute($endpoint, $request, $body);
         } catch (WebhookSignatureException $exception) {
@@ -103,11 +111,7 @@ final readonly class ReceiveWebhookAction
             return $this->refuse($endpoint, $request, $exception->reason());
         }
 
-        $wait = $this->limiter->attemptDelivery(Keys::of($endpoint), $endpoint->rate_limit_per_minute ?? WebhooksConfig::inboundRateLimit());
-
-        if ($wait !== null) {
-            return $this->rateLimited($endpoint, $request, 'del:'.Keys::of($endpoint), $wait);
-        }
+        $this->limiter->hitDelivery(Keys::of($endpoint));
 
         $payload = self::decode($body);
 

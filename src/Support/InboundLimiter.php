@@ -35,20 +35,24 @@ final readonly class InboundLimiter
     }
 
     /**
-     * Count one verified delivery; the seconds to wait when the endpoint is over its limit.
+     * The seconds to wait when the endpoint is over its verified-delivery limit — checked without
+     * spending anything, before the signature (a nonce verified only to be refused with 429
+     * could never be resent).
      */
-    public function attemptDelivery(int|string $endpointId, int $perMinute): ?int
+    public function deliveriesExhausted(int|string $endpointId, int $perMinute): ?int
     {
         $limiter = $this->limiter();
-        $key = 'webhooks:in:'.$endpointId;
+        $key = self::deliveryKey($endpointId);
 
-        if ($limiter->tooManyAttempts($key, $perMinute)) {
-            return max(1, $limiter->availableIn($key));
-        }
+        return $limiter->tooManyAttempts($key, $perMinute) ? max(1, $limiter->availableIn($key)) : null;
+    }
 
-        $limiter->hit($key, self::WINDOW);
-
-        return null;
+    /**
+     * Count one verified delivery.
+     */
+    public function hitDelivery(int|string $endpointId): void
+    {
+        $this->limiter()->hit(self::deliveryKey($endpointId), self::WINDOW);
     }
 
     /**
@@ -67,6 +71,11 @@ final readonly class InboundLimiter
     private function store(): Repository
     {
         return $this->cache->store(WebhooksConfig::rateLimitCacheStore());
+    }
+
+    private static function deliveryKey(int|string $endpointId): string
+    {
+        return 'webhooks:in:'.$endpointId;
     }
 
     private static function rejectionKey(int|string $endpointId, string $ip): string

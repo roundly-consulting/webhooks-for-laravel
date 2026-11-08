@@ -183,3 +183,24 @@ it('answers a resend of a stored nonce-keyed RFC 9421 delivery as a duplicate', 
 
     expect(InboundDelivery::query()->sole()->idempotency_key)->toStartWith('nonce:');
 });
+
+it('accepts the unchanged resend of an RFC 9421 delivery it refused with 429', function (): void {
+    $endpoint = rfc9421Endpoint();
+    $endpoint->forceFill(['rate_limit_per_minute' => 1])->save();
+    SignedWebhookRequest::for($endpoint)->keyId('partner')->send()->assertStatus(202);
+
+    $signed = SignedWebhookRequest::for($endpoint)->keyId('partner')->toRequest();
+    $server = ['CONTENT_TYPE' => 'application/json'];
+
+    foreach ($signed->headers as $name => $value) {
+        $server[strtoupper(str_replace('-', '_', $name)) === 'CONTENT_TYPE' ? 'CONTENT_TYPE' : 'HTTP_'.strtoupper(str_replace('-', '_', $name))] = $value;
+    }
+
+    $refused = $this->call('POST', $signed->uri, [], [], [], $server, $signed->body)->assertStatus(429);
+    $this->travel((int) $refused->headers->get('Retry-After') + 1)->seconds();
+
+    // The 429 asked the sender to retry: the same bytes, nonce included, must still be accepted.
+    $this->call('POST', $signed->uri, [], [], [], $server, $signed->body)->assertStatus(202);
+
+    expect(InboundDelivery::query()->count())->toBe(2);
+});
