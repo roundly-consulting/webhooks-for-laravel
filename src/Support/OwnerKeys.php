@@ -34,16 +34,12 @@ final class OwnerKeys
     }
 
     /**
-     * Whether an endpoint row belongs to the owner (null: owner-less).
+     * Whether an endpoint row belongs to the owner.
      */
-    public static function owns(?Model $owner, Model $endpoint): bool
+    public static function owns(Model $owner, Model $endpoint): bool
     {
         $type = $endpoint->getAttribute('owner_type');
         $id = $endpoint->getAttribute('owner_id');
-
-        if ($owner === null) {
-            return $type === null && $id === null;
-        }
 
         return $type === $owner->getMorphClass() && Keys::string($id) !== null && Keys::string($id) === Keys::string($owner->getKey());
     }

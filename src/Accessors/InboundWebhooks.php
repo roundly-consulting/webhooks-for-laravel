@@ -34,7 +34,6 @@ final readonly class InboundWebhooks
     public function __construct(
         private WebhooksManager $manager,
         private ?Model $owner = null,
-        private bool $scoped = false,
     ) {}
 
     public function create(
@@ -45,7 +44,7 @@ final readonly class InboundWebhooks
         ?InboundEndpointOptions $options = null,
         ?Model $owner = null,
     ): CreatedInboundEndpoint {
-        return $this->manager->createInboundEndpoint($this->scoped ? $this->owner : $owner, $handler, $scheme, $name, $secret, $options);
+        return $this->manager->createInboundEndpoint($this->owner ?? $owner, $handler, $scheme, $name, $secret, $options);
     }
 
     public function update(InboundEndpoint $endpoint, InboundEndpointChanges $changes): InboundEndpoint
@@ -138,7 +137,7 @@ final readonly class InboundWebhooks
             return $query->where('endpoint_id', $this->guard($endpoint)->getKey());
         }
 
-        return $this->scoped ? $query->whereIn('endpoint_id', $this->query()->select('id')) : $query;
+        return $this->owner === null ? $query : $query->whereIn('endpoint_id', $this->query()->select('id'));
     }
 
     /**
@@ -148,7 +147,7 @@ final readonly class InboundWebhooks
     {
         $query = ModelSeams::inboundEndpoint()::query();
 
-        return $this->scoped ? OwnerEndpoints::scope($query, $this->owner) : $query;
+        return $this->owner === null ? $query : OwnerEndpoints::scope($query, $this->owner);
     }
 
     /**
@@ -161,7 +160,7 @@ final readonly class InboundWebhooks
      */
     private function guard(InboundEndpoint $endpoint): InboundEndpoint
     {
-        if ($this->scoped && ! OwnerKeys::owns($this->owner, $endpoint)) {
+        if ($this->owner !== null && ! OwnerKeys::owns($this->owner, $endpoint)) {
             throw EndpointNotFoundException::make();
         }
 

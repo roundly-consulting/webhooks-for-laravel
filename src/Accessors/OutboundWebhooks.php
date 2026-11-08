@@ -34,7 +34,6 @@ final readonly class OutboundWebhooks
     public function __construct(
         private WebhooksManager $manager,
         private ?Model $owner = null,
-        private bool $scoped = false,
     ) {}
 
     /**
@@ -50,7 +49,7 @@ final readonly class OutboundWebhooks
         ?OutboundEndpointOptions $options = null,
         ?Model $owner = null,
     ): CreatedOutboundEndpoint {
-        return $this->manager->createOutboundEndpoint($url, $events, $name, $headers, $scheme, $options, $this->scoped ? $this->owner : $owner);
+        return $this->manager->createOutboundEndpoint($url, $events, $name, $headers, $scheme, $options, $this->owner ?? $owner);
     }
 
     public function update(OutboundEndpoint $endpoint, OutboundEndpointChanges $changes): OutboundEndpoint
@@ -139,7 +138,7 @@ final readonly class OutboundWebhooks
             return $query->where('endpoint_id', $this->guard($endpoint)->getKey());
         }
 
-        return $this->scoped ? $query->whereIn('endpoint_id', $this->query()->select('id')) : $query;
+        return $this->owner === null ? $query : $query->whereIn('endpoint_id', $this->query()->select('id'));
     }
 
     /**
@@ -168,7 +167,7 @@ final readonly class OutboundWebhooks
     {
         $query = ModelSeams::outboundEndpoint()::query();
 
-        return $this->scoped ? OwnerEndpoints::scope($query, $this->owner) : $query;
+        return $this->owner === null ? $query : OwnerEndpoints::scope($query, $this->owner);
     }
 
     /**
@@ -181,7 +180,7 @@ final readonly class OutboundWebhooks
      */
     private function guard(OutboundEndpoint $endpoint): OutboundEndpoint
     {
-        if ($this->scoped && ! OwnerKeys::owns($this->owner, $endpoint)) {
+        if ($this->owner !== null && ! OwnerKeys::owns($this->owner, $endpoint)) {
             throw EndpointNotFoundException::make();
         }
 

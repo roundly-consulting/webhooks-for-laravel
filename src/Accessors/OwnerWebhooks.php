@@ -24,12 +24,12 @@ final readonly class OwnerWebhooks
 
     public function inbound(): InboundWebhooks
     {
-        return new InboundWebhooks($this->manager, $this->owner, scoped: true);
+        return new InboundWebhooks($this->manager, $this->owner);
     }
 
     public function outbound(): OutboundWebhooks
     {
-        return new OutboundWebhooks($this->manager, $this->owner, scoped: true);
+        return new OutboundWebhooks($this->manager, $this->owner);
     }
 
     /**
