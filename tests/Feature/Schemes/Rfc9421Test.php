@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
@@ -142,4 +143,26 @@ it('doctor finds the key bound to an RFC 9421 endpoint', function (): void {
     rfc9421Endpoint();
 
     $this->artisan('webhooks:doctor')->expectsOutputToContain('No problems found')->assertSuccessful();
+});
+
+it('signs the query of an outbound RFC 9421 delivery so a default-profile receiver accepts it', function (): void {
+    rfc9421Endpoint();
+    publicDns();
+    Http::fake(['*' => Http::response('ok')]);
+    $endpoint = Webhooks::outbound()->create('https://hooks.example.com/in?token=abc', scheme: 'rfc9421', options: new OutboundEndpointOptions(schemeOptions: ['key_id' => 'partner']))->endpoint;
+
+    attempt(Webhooks::send($endpoint, 'invoice.paid', ['invoice' => 1]));
+
+    $sent = Http::recorded()[0][0];
+    $received = Request::create($sent->url(), 'POST', [], [], [], [], $sent->body());
+
+    foreach ($sent->headers() as $name => $values) {
+        $received->headers->set($name, implode(', ', $values));
+    }
+
+    // The receiver's default profile requires `@query` whenever the target has one.
+    $verified = Sentinel::signatures()->verify($received, 'default');
+
+    expect($verified->components)->toContain('@query')
+        ->and($sent->header('Signature-Input')[0])->toContain('"@query"');
 });

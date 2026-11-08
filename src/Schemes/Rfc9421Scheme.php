@@ -33,7 +33,8 @@ final readonly class Rfc9421Scheme implements SignatureScheme
 {
     public const string DEFAULT_ID_HEADER = 'webhook-id';
 
-    public const array OUTBOUND_COMPONENTS = ['@method', '@authority', '@path', 'content-digest', 'content-type', 'webhook-id', 'webhook-timestamp'];
+    /** `@query` is signed only when the URL has one (sentinel drops it otherwise), as its default profile requires. */
+    public const array OUTBOUND_COMPONENTS = ['@method', '@authority', '@path', '@query', 'content-digest', 'content-type', 'webhook-id', 'webhook-timestamp'];
 
     public function __construct(private SentinelManager $sentinel) {}
 
