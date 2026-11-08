@@ -13,8 +13,8 @@ Initial public release.
 - **Inbound endpoints** — one per sender, owned by any model (or none): an unguessable URL key, a
   secret shown once (generated `whsec_…`, or the sender's imported verbatim), rotation with a grace
   period in which both secrets verify, a handler alias, per-endpoint overrides.
-- **The inbound pipeline** behind `POST {prefix}/{key}` (or your own route via
-  `Webhooks::inbound()->receive()`): unknown and disabled keys answer the same 404, a rejection
+- **The inbound pipeline** behind `POST {prefix}/{key}` (or your own with `Route::webhooks('hooks')`,
+  which also keeps Laravel's body-decoding middleware off it, or `Webhooks::inbound()->receive()`): unknown and disabled keys answer the same 404, a rejection
   guard per endpoint and IP, size (413) and content-type (415) checks before any signature work,
   signature and timestamp tolerance (401), a per-endpoint limit on verified deliveries (429),
   JSON decoded to arrays only (400), replay and idempotency through sentinel (200 duplicate or

@@ -7,9 +7,8 @@ namespace RoundlyConsulting\Webhooks;
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Foundation\Application;
-use Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull;
-use Illuminate\Foundation\Http\Middleware\TrimStrings;
-use Illuminate\Http\Request;
+use Illuminate\Routing\Route;
+use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Schema;
 use RoundlyConsulting\HttpClientRateLimits\Jitter\Randomizer;
 use RoundlyConsulting\HttpClientRateLimits\Jitter\RandomRandomizer;
@@ -27,6 +26,7 @@ use RoundlyConsulting\Webhooks\Commands\RetryCommand;
 use RoundlyConsulting\Webhooks\Commands\RotateSecretCommand;
 use RoundlyConsulting\Webhooks\Contracts\PayloadSanitizer;
 use RoundlyConsulting\Webhooks\Exceptions\InvalidWebhooksConfigurationException;
+use RoundlyConsulting\Webhooks\Support\InboundRoute;
 use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
 
 final class WebhooksServiceProvider extends PackageServiceProvider
@@ -85,7 +85,16 @@ final class WebhooksServiceProvider extends PackageServiceProvider
         parent::boot();
 
         $this->registerBlueprintMacros();
-        $this->skipBodyDecodingMiddleware();
+
+        if (WebhooksConfig::routeEnabled()) {
+            InboundRoute::skipBodyDecoding(WebhooksConfig::routePrefix());
+        }
+
+        // Route::webhooks('hooks', ['throttle:webhooks']) — a host's own inbound route.
+        Router::macro('webhooks', function (string $prefix = 'webhooks', array $middleware = []): Route {
+            /** @var Router $this */
+            return InboundRoute::mount($this, $prefix, array_values(array_filter($middleware, is_string(...))));
+        });
 
         $this->callAfterResolving(Schedule::class, static function (Schedule $schedule): void {
             if (! WebhooksConfig::scheduleEnabled()) {
@@ -97,23 +106,6 @@ final class WebhooksServiceProvider extends PackageServiceProvider
             self::every($schedule->command('webhooks:retry'), WebhooksConfig::retryFrequency())->withoutOverlapping()->onOneServer()->when($ready);
             self::every($schedule->command('webhooks:prune'), WebhooksConfig::pruneFrequency())->withoutOverlapping()->onOneServer()->when($ready);
         });
-    }
-
-    /**
-     * Laravel's global TrimStrings / ConvertEmptyStringsToNull decode a JSON body with
-     * `$request->json()` before any route runs — an unbounded body, before the size check. Skip
-     * them on the inbound route (a host mounting its own route registers the same callbacks).
-     */
-    private function skipBodyDecodingMiddleware(): void
-    {
-        if (! WebhooksConfig::routeEnabled()) {
-            return;
-        }
-
-        $inbound = static fn (Request $request): bool => $request->isMethod('POST') && $request->is(WebhooksConfig::routePrefix().'/*');
-
-        TrimStrings::skipWhen($inbound);
-        ConvertEmptyStringsToNull::skipWhen($inbound);
     }
 
     private static function every(Event $event, string $frequency): Event
