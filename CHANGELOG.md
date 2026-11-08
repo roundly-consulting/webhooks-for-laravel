@@ -28,6 +28,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 - `Webhooks::fake()` treats `send(..., id:)` for a delivery already stored (sent before the fake was
   swapped in) as an idempotent repeat: it returns that delivery and records nothing, like
   production.
+- `SignedWebhookRequest` builds a request by the endpoint scheme's class, not its name: a scheme
+  name mapped to `Rfc9421Scheme` now signs (instead of throwing "cannot sign"), and `unsigned()` on
+  a name mapped to `DefaultScheme` keeps the id and timestamp headers.
 
 ## 1.0.0 - 2026-11-08
 

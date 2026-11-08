@@ -34,7 +34,9 @@ use RoundlyConsulting\Webhooks\Exceptions\WebhookSignatureException;
 use RoundlyConsulting\Webhooks\Facades\Webhooks;
 use RoundlyConsulting\Webhooks\Models\InboundDelivery;
 use RoundlyConsulting\Webhooks\Models\InboundEndpoint;
+use RoundlyConsulting\Webhooks\Schemes\DefaultScheme;
 use RoundlyConsulting\Webhooks\Schemes\EndpointSecrets;
+use RoundlyConsulting\Webhooks\Schemes\Rfc9421Scheme;
 use RoundlyConsulting\Webhooks\Testing\SignedWebhookRequest;
 
 const PARTNER_KEY = 'base64:cGFydG5lci1zaGFyZWQtc2VjcmV0LTMyLWJ5dGVzLWxvbmctZm9yLWhtYWM=';
@@ -194,6 +196,22 @@ it('refuses an outbound scheme that cannot sign', function (): void {
     $this->artisan('webhooks:doctor')->expectsOutputToContain(__('webhooks::commands.doctor.rfc9421_outbound_no_key'));
     config()->set('webhooks.rfc9421.outbound_key_id', 'partner');
     $this->artisan('webhooks:doctor')->doesntExpectOutputToContain(__('webhooks::commands.doctor.rfc9421_outbound_no_key'));
+});
+
+it('builds requests by the scheme class, not its name', function (): void {
+    config()->set('webhooks.schemes.sig', Rfc9421Scheme::class);
+    config()->set('webhooks.schemes.std', DefaultScheme::class);
+    rfc9421Endpoint();   // the partner ring and key store
+    $sig = Webhooks::inbound()->create(scheme: 'sig')->endpoint;
+    Sentinel::keys()->ring('http')->import('partner-sig', Algorithm::HmacSha256, PARTNER_KEY, owner: $sig);
+    config()->set('sentinel.keys.rings.partner.key_id', 'partner-sig');
+    app(KeyStoreManager::class)->flush();
+    $std = Webhooks::inbound()->create(scheme: 'std', secret: V2_SECRET)->endpoint;
+
+    SignedWebhookRequest::for($sig)->keyId('partner-sig')->send()->assertStatus(202);
+    SignedWebhookRequest::for($sig)->keyId('partner-sig')->tamper()->send()->assertStatus(401);
+    expect(SignedWebhookRequest::for($std)->unsigned()->toRequest()->headers)->toHaveKeys([DefaultScheme::ID, DefaultScheme::TIMESTAMP]);
+    SignedWebhookRequest::for($std)->unsigned()->send()->assertStatus(401)->assertJson(['code' => 'missing_signature']);
 });
 
 it('doctor finds the key bound to an RFC 9421 endpoint', function (): void {

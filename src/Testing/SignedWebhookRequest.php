@@ -16,10 +16,12 @@ use LogicException;
 use RoundlyConsulting\Sentinel\DataTransferObjects\SigningOptions;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Webhooks\Accessors\SchemeRegistry;
+use RoundlyConsulting\Webhooks\Contracts\SignatureScheme;
 use RoundlyConsulting\Webhooks\Contracts\SignsOutboundWebhooks;
 use RoundlyConsulting\Webhooks\DataTransferObjects\OutgoingWebhook;
 use RoundlyConsulting\Webhooks\DataTransferObjects\SignatureHeaders;
 use RoundlyConsulting\Webhooks\DataTransferObjects\SignedRequestData;
+use RoundlyConsulting\Webhooks\Exceptions\UnknownSchemeException;
 use RoundlyConsulting\Webhooks\Models\InboundEndpoint;
 use RoundlyConsulting\Webhooks\Schemes\DefaultScheme;
 use RoundlyConsulting\Webhooks\Schemes\EndpointSecrets;
@@ -218,11 +220,12 @@ final class SignedWebhookRequest
         $id = $this->id ?? 'msg_'.Str::ulid();
         $timestamp = ($this->at === null ? Clock::now() : Clock::utc($this->at))->subSeconds($this->staleBy);
         $uri = $this->endpoint->url();
-        $scheme = $this->endpoint->signature_scheme;
+        // By class, like production: any name the registry maps to a scheme behaves as that scheme.
+        $scheme = $this->registeredScheme();
 
         $data = match (true) {
-            $this->unsigned => $this->unsignedRequest($uri, $id, $timestamp, $body),
-            $scheme === 'rfc9421' => $this->rfc9421($uri, $id, (string) $timestamp->getTimestamp(), $body),
+            $this->unsigned => $this->unsignedRequest($uri, $id, $timestamp, $body, $scheme),
+            $scheme instanceof Rfc9421Scheme => $this->rfc9421($uri, $id, (string) $timestamp->getTimestamp(), $body),
             default => $this->signed($uri, new OutgoingWebhook($id, $timestamp, $body, $this->eventType())),
         };
 
@@ -273,9 +276,18 @@ final class SignedWebhookRequest
         return new SignedRequestData($uri, [...$this->headers, ...$headers], $body);
     }
 
-    private function unsignedRequest(string $uri, string $id, CarbonInterface $timestamp, string $body): SignedRequestData
+    private function registeredScheme(): ?SignatureScheme
     {
-        $headers = $this->endpoint->signature_scheme === 'default'
+        try {
+            return app(SchemeRegistry::class)->resolve($this->endpoint->signature_scheme);
+        } catch (UnknownSchemeException) {
+            return null;
+        }
+    }
+
+    private function unsignedRequest(string $uri, string $id, CarbonInterface $timestamp, string $body, ?SignatureScheme $scheme): SignedRequestData
+    {
+        $headers = $scheme instanceof DefaultScheme
             ? [DefaultScheme::ID => $id, DefaultScheme::TIMESTAMP => (string) $timestamp->getTimestamp()]
             : [];
 
