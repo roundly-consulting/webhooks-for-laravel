@@ -160,9 +160,15 @@ it('an_oversized_signature_header_is_refused', function (string $header): void {
     'over 4 KB' => 'v1,'.str_repeat('A', 4100),
 ]);
 
-it('refuses a delivery id with a dot or a space', function (): void {
-    SignedWebhookRequest::for(inboundEndpoint())->id('msg.1')->send()->assertStatus(401);
-});
+it('accepts any visible ascii delivery id standard webhooks senders use', function (string $id): void {
+    SignedWebhookRequest::for(inboundEndpoint())->id($id)->send()->assertStatus(202);
+
+    expect(InboundDelivery::query()->sole()->external_id)->toBe($id);
+})->with(['evt.123', 'urn:evt:1', '{0b0a7b1e-4c55-4b8e-9d0e-6f1c3f6a2b10}', 'a/b+c=d']);
+
+it('refuses a delivery id with a space, a control byte or over 255 bytes', function (string $id): void {
+    SignedWebhookRequest::for(inboundEndpoint())->id($id)->send()->assertStatus(401);
+})->with(['msg 1', 'msg', str_repeat('a', 256)]);
 
 it('rejections_render_problem_json_without_internals', function (): void {
     $response = SignedWebhookRequest::for(inboundEndpoint())->tamper()->send();

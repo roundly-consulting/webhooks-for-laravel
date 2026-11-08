@@ -68,7 +68,8 @@ final readonly class DefaultScheme implements SignatureScheme, SignsOutboundWebh
             throw WebhookSignatureException::because(RejectionReason::StaleTimestamp);
         }
 
-        if (preg_match('/^[A-Za-z0-9_-]{1,255}$/D', $id) !== 1 || strlen($signature) > self::MAX_HEADER_BYTES) {
+        // Any visible ASCII (the spec does not narrow the id; the MAC covers it either way).
+        if (preg_match('/^[\x21-\x7e]{1,255}$/D', $id) !== 1 || strlen($signature) > self::MAX_HEADER_BYTES) {
             throw WebhookSignatureException::because(RejectionReason::InvalidSignature);
         }
 
