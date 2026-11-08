@@ -50,6 +50,8 @@ return new class extends Migration
             $table->unique(['endpoint_id', 'idempotency_key'], 'whin_dl_key_unique');
             $table->index(['status', 'received_at'], 'whin_dl_status_idx');
             $table->index(['endpoint_id', 'received_at'], 'whin_dl_endpoint_idx');
+            // The body guard of timestamp-less, unsigned-id schemes outlives the idempotency store.
+            $table->index(['endpoint_id', 'payload_digest'], 'whin_dl_digest_idx');
             $table->foreign('endpoint_id', 'whin_dl_endpoint_fk')->references('id')->on(WebhooksConfig::inboundEndpointsTable())->restrictOnDelete();
         });
     }

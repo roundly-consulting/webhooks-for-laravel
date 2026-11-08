@@ -102,11 +102,14 @@ final readonly class AcceptInboundDeliveryAction
     }
 
     /**
-     * A delivery stored but never queued (the queue was down) is queued by its duplicate.
+     * A delivery stored but never queued (the queue was down) is queued by its duplicate — the
+     * one the duplicate was matched to (by public id; a same-body twin has another key).
      */
-    public function requeueStalled(InboundEndpoint $endpoint, string $idempotencyKey): void
+    public function requeueStalled(InboundEndpoint $endpoint, string $idempotencyKey, string $publicId = ''): void
     {
-        $delivery = $this->stored($endpoint, $idempotencyKey);
+        $delivery = $publicId === ''
+            ? $this->stored($endpoint, $idempotencyKey)
+            : ModelSeams::inboundDelivery()::query()->where('endpoint_id', $endpoint->getKey())->where('public_id', $publicId)->first();
 
         if ($delivery !== null && $delivery->status === InboundStatus::Received && $delivery->queued_at === null) {
             $this->queue($delivery);

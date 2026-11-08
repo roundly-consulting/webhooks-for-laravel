@@ -11,6 +11,7 @@ use RoundlyConsulting\Webhooks\Accessors\SchemeRegistry;
 use RoundlyConsulting\Webhooks\Contracts\SignatureScheme;
 use RoundlyConsulting\Webhooks\DataTransferObjects\IncomingWebhook;
 use RoundlyConsulting\Webhooks\DataTransferObjects\VerifiedWebhook;
+use RoundlyConsulting\Webhooks\Enums\InboundStatus;
 use RoundlyConsulting\Webhooks\Enums\RejectionReason;
 use RoundlyConsulting\Webhooks\Enums\SecretEncoding;
 use RoundlyConsulting\Webhooks\Exceptions\InvalidEndpointException;
@@ -19,6 +20,7 @@ use RoundlyConsulting\Webhooks\Exceptions\UnknownHandlerException;
 use RoundlyConsulting\Webhooks\Exceptions\UnknownSchemeException;
 use RoundlyConsulting\Webhooks\Exceptions\WebhookSignatureException;
 use RoundlyConsulting\Webhooks\Facades\Webhooks;
+use RoundlyConsulting\Webhooks\Jobs\ProcessInboundDelivery;
 use RoundlyConsulting\Webhooks\Models\InboundDelivery;
 use RoundlyConsulting\Webhooks\Schemes\DefaultScheme;
 use RoundlyConsulting\Webhooks\Schemes\EndpointSecrets;
@@ -223,4 +225,45 @@ it('stripe_recipe_bounds_the_signature_entries_it_checks', function (): void {
         // Each entry costs a MAC per secret over the body: a caller cannot make it a hundred.
         ->and(fn () => $verify("t={$t},".str_repeat('v1=00,', 8).$valid))->toThrow(WebhookSignatureException::class)
         ->and(fn () => $verify("t={$t},v0=".str_repeat('a', 4096).','.$valid))->toThrow(WebhookSignatureException::class);
+});
+
+it('a_timestampless_scheme_refuses_a_captured_body_after_the_dedupe_ttl', function (): void {
+    $secret = 'gh-shared-secret';
+    $endpoint = Webhooks::inbound()->create(scheme: 'github', secret: $secret)->endpoint;
+    $body = '{"action":"opened"}';
+    $post = fn (string $delivery) => $this->call('POST', $endpoint->url(), [], [], [], [
+        'CONTENT_TYPE' => 'application/json',
+        'HTTP_X_HUB_SIGNATURE_256' => 'sha256='.hash_hmac('sha256', $body, $secret),
+        'HTTP_X_GITHUB_DELIVERY' => $delivery,
+        'HTTP_X_GITHUB_EVENT' => 'pull_request',
+    ], $body);
+
+    $post('d-1')->assertStatus(202);
+    // No timestamp in the format: once the idempotency store forgot the body, the stored
+    // delivery's digest still recognises the captured request under a fresh delivery id.
+    $this->travel(config('webhooks.inbound.dedupe_ttl') + 60)->seconds();
+    $post('d-2')->assertStatus(200)->assertJson(['status' => 'duplicate']);
+
+    expect(InboundDelivery::query()->count())->toBe(1);
+});
+
+it('a_same_body_duplicate_under_a_fresh_id_queues_the_stalled_original', function (): void {
+    $secret = 'gh-shared-secret';
+    $endpoint = Webhooks::inbound()->create(scheme: 'github', secret: $secret)->endpoint;
+    $body = '{"action":"closed"}';
+    $post = fn (string $delivery) => $this->call('POST', $endpoint->url(), [], [], [], [
+        'CONTENT_TYPE' => 'application/json',
+        'HTTP_X_HUB_SIGNATURE_256' => 'sha256='.hash_hmac('sha256', $body, $secret),
+        'HTTP_X_GITHUB_DELIVERY' => $delivery,
+    ], $body);
+
+    $post('d-1')->assertStatus(202);
+    $original = InboundDelivery::query()->sole();
+    // As if the dispatch after the insert had failed.
+    $original->forceFill(['status' => InboundStatus::Received, 'queued_at' => null])->save();
+
+    $post('d-2')->assertStatus(200)->assertJson(['status' => 'duplicate']);
+
+    Queue::assertPushed(ProcessInboundDelivery::class, 2);
+    expect($original->refresh()->status)->toBe(InboundStatus::Queued);
 });

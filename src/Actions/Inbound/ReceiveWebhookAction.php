@@ -138,7 +138,7 @@ final readonly class ReceiveWebhookAction
 
         if ($result->duplicate) {
             // A duplicate of a delivery stored while the queue was down queues it now.
-            $this->accept->requeueStalled($endpoint, $idempotencyKey);
+            $this->accept->requeueStalled($endpoint, $idempotencyKey, $result->id);
 
             return $this->duplicate();
         }
@@ -171,7 +171,26 @@ final readonly class ReceiveWebhookAction
             return AcceptedDelivery::fromStored($run());
         }
 
-        return self::outcome($this->sentinel->idempotency()->run('body:'.$digest, $scope.':body', $run, $digest, $ttl));
+        // No signed timestamp either: nothing bounds a replay in time, so the stored deliveries'
+        // digests keep guarding after the idempotency store forgot the body.
+        $guarded = $verified->timestamp === null
+            ? fn (): array => self::storedTwin($endpoint, $digest)?->toStored() ?? $run()
+            : $run;
+
+        return self::outcome($this->sentinel->idempotency()->run('body:'.$digest, $scope.':body', $guarded, $digest, $ttl));
+    }
+
+    /**
+     * A delivery of this endpoint with the same body, still in the log.
+     */
+    private static function storedTwin(InboundEndpoint $endpoint, string $digest): ?AcceptedDelivery
+    {
+        $twin = ModelSeams::inboundDelivery()::query()
+            ->where('endpoint_id', Keys::of($endpoint))
+            ->where('payload_digest', $digest)
+            ->first();
+
+        return $twin === null ? null : new AcceptedDelivery($twin->public_id, true);
     }
 
     private static function outcome(IdempotentResult $result): AcceptedDelivery
