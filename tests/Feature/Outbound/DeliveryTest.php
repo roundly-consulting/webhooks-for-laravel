@@ -608,6 +608,17 @@ it('returns the first delivery for a repeat after the endpoint stopped accepting
     }
 })->with(['production' => false, 'fake' => true])->with(['disabled', 'unsubscribed']);
 
+it('fake treats a stored delivery as an idempotent repeat', function (): void {
+    $endpoint = outboundEndpoint();
+    $stored = Webhooks::send($endpoint, 'invoice.paid', ['invoice' => 9], id: 'evt-9');
+    $fake = Webhooks::fake();
+
+    $repeat = Webhooks::send($endpoint, 'invoice.paid', ['invoice' => 9], id: 'evt-9');
+
+    expect($repeat->is($stored))->toBeTrue();
+    $fake->assertNothingSent();
+});
+
 it('an_idempotent_send_racing_its_twin_returns_the_twin', function (): void {
     $endpoint = outboundEndpoint();
     $publicId = OutboundDeliveries::publicId($endpoint, 'race');

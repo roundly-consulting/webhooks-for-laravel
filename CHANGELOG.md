@@ -25,6 +25,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   `EndpointNotAcceptingException`; `Webhooks::fake()` behaves the same.
 - `Webhooks::fake()`'s `inbound()->replay()` now replays a `processing` run that is past its time
   budget (a lost run), like production, instead of refusing every `processing` delivery.
+- `Webhooks::fake()` treats `send(..., id:)` for a delivery already stored (sent before the fake was
+  swapped in) as an idempotent repeat: it returns that delivery and records nothing, like
+  production.
 
 ## 1.0.0 - 2026-11-08
 

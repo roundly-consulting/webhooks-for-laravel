@@ -76,12 +76,22 @@ final class WebhooksFake extends WebhooksManager
      */
     public function send(OutboundEndpoint $endpoint, string $eventType, array|Arrayable|JsonSerializable $payload, ?string $id = null): OutboundDelivery
     {
-        // An idempotent repeat returns the first delivery before anything is validated, and
-        // records nothing (production queues nothing).
-        $first = $id === null ? null : $this->firstSend(OutboundDelivery::ID_PREFIX.OutboundDeliveries::publicId($endpoint, $id));
+        // An idempotent repeat — of a send under this fake, or of a delivery already stored —
+        // returns the first delivery before anything is validated, and records nothing
+        // (production queues nothing).
+        if ($id !== null) {
+            $publicId = OutboundDeliveries::publicId($endpoint, $id);
+            $first = $this->firstSend(OutboundDelivery::ID_PREFIX.$publicId);
 
-        if ($first !== null) {
-            return $this->pending($first->endpoint, $first->eventType, $first->body, substr($first->webhookId, strlen(OutboundDelivery::ID_PREFIX)));
+            if ($first !== null) {
+                return $this->pending($first->endpoint, $first->eventType, $first->body, $publicId);
+            }
+
+            $stored = OutboundDeliveries::existing($publicId);
+
+            if ($stored !== null) {
+                return $stored;
+            }
         }
 
         return $this->record($endpoint, $eventType, $payload, false, $id);
