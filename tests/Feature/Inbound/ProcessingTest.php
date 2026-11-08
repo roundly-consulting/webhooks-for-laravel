@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Carbon\CarbonImmutable;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use RoundlyConsulting\Webhooks\DataTransferObjects\InboundWebhook;
@@ -12,6 +14,7 @@ use RoundlyConsulting\Webhooks\Events\WebhookReceived;
 use RoundlyConsulting\Webhooks\Exceptions\PayloadPrunedException;
 use RoundlyConsulting\Webhooks\Exceptions\UnknownHandlerException;
 use RoundlyConsulting\Webhooks\Facades\Webhooks;
+use RoundlyConsulting\Webhooks\Http\Resources\InboundDeliveryResource;
 use RoundlyConsulting\Webhooks\Jobs\ProcessInboundDelivery;
 use RoundlyConsulting\Webhooks\Models\InboundDelivery;
 use RoundlyConsulting\Webhooks\Models\OutboundAttempt;
@@ -89,7 +92,7 @@ it('a_failing_handler_is_retried_then_marked_failed', function (): void {
     $delivery->refresh();
     expect($delivery->status)->toBe(InboundStatus::Failed)
         ->and($delivery->last_error_code)->toBe('handler_failed')
-        ->and($delivery->last_error_message)->toBe('RuntimeException: ledger down');
+        ->and($delivery->last_error_message)->toBe('RuntimeException');
     Event::assertDispatched(WebhookProcessingFailed::class, fn (WebhookProcessingFailed $event): bool => $event->errorCode === 'handler_failed');
 });
 
@@ -187,4 +190,31 @@ it('a_closure_handler_runs', function (): void {
     expect($seen)->toBe([42])
         ->and(Webhooks::handlers()->has('inline'))->toBeTrue()
         ->and(InboundDelivery::query()->sole()->status)->toBe(InboundStatus::Processed);
+});
+
+it('never stores the message of a handler exception, which may carry payload data', function (): void {
+    Queue::fake();
+    Webhooks::handlers()->register('leaky', function (InboundWebhook $webhook): void {
+        DB::table('missing_table')->insert(['card' => $webhook->get('card')]);
+    });
+    $endpoint = inboundEndpoint(['handler' => 'leaky']);
+    postSigned($endpoint, ['type' => 'card.added', 'card' => '4111111111111111'])->assertStatus(202);
+    $delivery = InboundDelivery::query()->sole();
+    $job = new ProcessInboundDelivery($delivery->getKey());
+
+    try {
+        app()->call([$job, 'handle']);
+    } catch (QueryException $exception) {
+        $job->failed($exception);
+    }
+
+    $delivery->refresh();
+    $rendered = json_encode((new InboundDeliveryResource($delivery))->resolve(request()), JSON_THROW_ON_ERROR);
+
+    // The SQL with its bound values, the connection and the database stay in report() only.
+    expect($delivery->last_error_message)->toBe('QueryException (HY000)')
+        ->and($rendered)->not->toContain('4111111111111111')->not->toContain('missing_table')
+        ->and($rendered)->toContain('QueryException (HY000)');
+
+    Webhooks::handlers()->forget('leaky');
 });

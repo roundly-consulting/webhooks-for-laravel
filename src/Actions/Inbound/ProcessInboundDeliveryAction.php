@@ -87,8 +87,9 @@ final readonly class ProcessInboundDeliveryAction
 
     /**
      * The handler failed on its last try (`handler_failed`), or the endpoint is gone
-     * (`endpoint_deleted`): a safe error (the exception's short name and a truncated message —
-     * never the payload) and `WebhookProcessingFailed`.
+     * (`endpoint_deleted`): a safe error and `WebhookProcessingFailed`. Only the exception's short
+     * name (and a short code, such as an SQLSTATE) is stored — a message may quote the payload or
+     * the SQL with its bound values; the full exception goes to `report()` with the failed job.
      */
     public function fail(int|string $deliveryId, ?Throwable $exception, string $code = 'handler_failed'): void
     {
@@ -102,9 +103,16 @@ final readonly class ProcessInboundDeliveryAction
             'status' => InboundStatus::Failed,
             'failed_at' => Clock::now(),
             'last_error_code' => $code,
-            'last_error_message' => $exception === null ? null : mb_substr(class_basename($exception).': '.$exception->getMessage(), 0, 500),
+            'last_error_message' => $exception === null ? null : self::summary($exception),
         ])->save();
 
         $this->events->dispatch(new WebhookProcessingFailed($delivery, $code));
+    }
+
+    private static function summary(Throwable $exception): string
+    {
+        $code = (string) $exception->getCode();
+
+        return class_basename($exception).($code !== '0' && preg_match('/^[A-Za-z0-9_.-]{1,32}$/D', $code) === 1 ? " ({$code})" : '');
     }
 }
