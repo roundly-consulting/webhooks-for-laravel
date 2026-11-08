@@ -163,7 +163,9 @@ final readonly class ReceiveWebhookAction
         $accept = fn (): array => $this->accept->execute($endpoint, $verified, $idempotencyKey, $payload, $headers, $body)->toStored();
         $run = fn (): array => self::outcome($this->sentinel->idempotency()->run($idempotencyKey, $scope, $accept, $digest, $ttl))->toStored();
 
-        if ($verified->idIsSigned) {
+        // Signed only when the scheme supplied the id: an id-less verdict falls back to the
+        // unsigned `Idempotency-Key`, whatever the scheme claims.
+        if ($verified->idIsSigned && $verified->deliveryId !== null && $verified->deliveryId !== '') {
             return AcceptedDelivery::fromStored($run());
         }
 

@@ -21,7 +21,8 @@ use RoundlyConsulting\Webhooks\Schemes\EndpointSecrets;
 /**
  * The docs recipe: `Stripe-Signature: t=<ts>,v1=<hex HMAC("t.body")>`. The key is the whole
  * `whsec_…` string as raw bytes — `SecretEncoding::Raw`, never base64-decoded. The event id sits
- * inside the signed body, so it is a signed id. `sign()` is optional (outbound use and
+ * inside the signed body, so it is a signed id (a body without one is not: the pipeline then falls
+ * back to the unsigned `Idempotency-Key`). `sign()` is optional (outbound use and
  * `SignedWebhookRequest`).
  */
 final readonly class StripeScheme implements SignatureScheme, SignsOutboundWebhooks
@@ -55,9 +56,10 @@ final readonly class StripeScheme implements SignatureScheme, SignsOutboundWebho
 
             if ($slot !== null) {
                 $event = json_decode($request->body, true);
-                $id = is_array($event) ? ($event['id'] ?? null) : null;
+                $id = is_array($event) && is_string($event['id'] ?? null) ? $event['id'] : null;
 
-                return new VerifiedWebhook(is_string($id) ? $id : null, CarbonImmutable::createFromTimestampUTC((int) $timestamp), null, true, $slot);
+                // Signed only when the body carries it; without one the id is an unsigned header.
+                return new VerifiedWebhook($id, CarbonImmutable::createFromTimestampUTC((int) $timestamp), null, $id !== null, $slot);
             }
         }
 

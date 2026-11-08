@@ -8,13 +8,16 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
 use RoundlyConsulting\Webhooks\Accessors\HandlerRegistry;
 use RoundlyConsulting\Webhooks\Accessors\SchemeRegistry;
+use RoundlyConsulting\Webhooks\Contracts\SignatureScheme;
 use RoundlyConsulting\Webhooks\DataTransferObjects\IncomingWebhook;
 use RoundlyConsulting\Webhooks\DataTransferObjects\VerifiedWebhook;
+use RoundlyConsulting\Webhooks\Enums\RejectionReason;
 use RoundlyConsulting\Webhooks\Enums\SecretEncoding;
 use RoundlyConsulting\Webhooks\Exceptions\InvalidEndpointException;
 use RoundlyConsulting\Webhooks\Exceptions\InvalidWebhooksConfigurationException;
 use RoundlyConsulting\Webhooks\Exceptions\UnknownHandlerException;
 use RoundlyConsulting\Webhooks\Exceptions\UnknownSchemeException;
+use RoundlyConsulting\Webhooks\Exceptions\WebhookSignatureException;
 use RoundlyConsulting\Webhooks\Facades\Webhooks;
 use RoundlyConsulting\Webhooks\Models\InboundDelivery;
 use RoundlyConsulting\Webhooks\Schemes\DefaultScheme;
@@ -163,4 +166,44 @@ it('stripe_recipe_marks_the_body_id_signed', function (): void {
     expect($event->idIsSigned)->toBeTrue()->and($event->deliveryId)->toBe('evt_1')
         // A body that is no JSON object: no id, no crash (the pipeline refuses it with a 400 later).
         ->and($scalar->deliveryId)->toBeNull();
+});
+
+it('stripe_recipe_claims_no_signed_id_for_a_body_without_one', function (): void {
+    $secret = 'whsec_StripeStyleSecretUsedAsRawBytes';
+    $now = CarbonImmutable::now();
+    $t = (string) $now->getTimestamp();
+    $body = '{"type":"charge.succeeded"}';
+    $headers = ['stripe-signature' => "t={$t},v1=".hash_hmac('sha256', $t.'.'.$body, $secret)];
+
+    $verified = (new StripeScheme)->verify(new IncomingWebhook($headers, $body, $now, '1', 300), new EndpointSecrets([$secret], app(MacEngine::class)));
+
+    // No id in the body: whatever id the pipeline falls back to is not covered by the signature.
+    expect($verified->deliveryId)->toBeNull()->and($verified->idIsSigned)->toBeFalse();
+});
+
+it('does_not_trust_a_signed_id_flag_without_an_id', function (): void {
+    Webhooks::schemes()->extend('bodyonly', fn (): SignatureScheme => new class implements SignatureScheme
+    {
+        public function verify(IncomingWebhook $request, EndpointSecrets $secrets): VerifiedWebhook
+        {
+            $slot = $secrets->matches($request->body, (string) hex2bin((string) $request->header('x-sig')), SecretEncoding::Raw)
+                ?? throw WebhookSignatureException::because(RejectionReason::InvalidSignature);
+
+            // Claims a signed id but returns none.
+            return new VerifiedWebhook(null, null, null, true, $slot);
+        }
+    });
+    $endpoint = Webhooks::inbound()->create(scheme: 'bodyonly', secret: 'raw-shared-secret')->endpoint;
+    $body = '{"type":"charge.succeeded","amount":5}';
+    $post = fn (string $key) => $this->call('POST', $endpoint->url(), [], [], [], [
+        'CONTENT_TYPE' => 'application/json',
+        'HTTP_X_SIG' => hash_hmac('sha256', $body, 'raw-shared-secret'),
+        'HTTP_IDEMPOTENCY_KEY' => $key,
+    ], $body);
+
+    $post('k1')->assertStatus(202);
+    // The captured request replayed under a fresh, unsigned Idempotency-Key: the body guard holds.
+    $post('attacker-fresh')->assertStatus(200)->assertJson(['status' => 'duplicate']);
+
+    expect(InboundDelivery::query()->count())->toBe(1);
 });
