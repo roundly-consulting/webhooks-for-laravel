@@ -3,7 +3,9 @@
 declare(strict_types=1);
 
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Artisan;
+use RoundlyConsulting\Sentinel\Contracts\NonceStore;
 use RoundlyConsulting\Webhooks\DataTransferObjects\DoctorFinding;
 use RoundlyConsulting\Webhooks\Enums\FindingLevel;
 use RoundlyConsulting\Webhooks\Enums\InboundStatus;
@@ -181,3 +183,36 @@ it('doctor_flags_an_rfc9421_profile_without_nonce_or_body_binding', function (st
     expect(doctorFinding('rfc9421_profile_weak')?->detail)->toBe((string) $endpoint->getKey())
         ->and(doctorFinding('rfc9421_profile_weak')?->level)->toBe(FindingLevel::Warning);
 })->with(['require_nonce', 'require_content_digest']);
+
+it('doctor_flags_a_nonce_store_that_cannot_look_a_nonce_up', function (): void {
+    $endpoint = inboundEndpoint(['signature_scheme' => 'rfc9421']);
+    expect(doctorChecks())->not->toContain('rfc9421_nonce_store');
+
+    // A custom store without InspectsNonces: every RFC 9421 delivery would fail to verify.
+    app()->bind(NonceStore::class, fn (): NonceStore => new class implements NonceStore
+    {
+        public function issue(string $purpose, string $digest, CarbonImmutable $expiresAt, ?Model $subject): void {}
+
+        public function consume(string $purpose, string $digest, CarbonImmutable $now, ?Model $subject): bool
+        {
+            return false;
+        }
+
+        public function remember(string $purpose, string $digest, CarbonImmutable $until, CarbonImmutable $now): bool
+        {
+            return true;
+        }
+
+        public function prune(CarbonImmutable $now): int
+        {
+            return 0;
+        }
+    });
+
+    expect(doctorFinding('rfc9421_nonce_store')?->detail)->toBe((string) $endpoint->getKey())
+        ->and(doctorFinding('rfc9421_nonce_store')?->level)->toBe(FindingLevel::Error);
+
+    // A store that cannot even be built fails the same way.
+    app()->bind(NonceStore::class, fn (): NonceStore => throw new RuntimeException('no store'));
+    expect(doctorChecks())->toContain('rfc9421_nonce_store');
+});

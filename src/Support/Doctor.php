@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\Webhooks\Support;
 
+use Illuminate\Container\Container;
 use Illuminate\Support\Facades\Schema;
 use RoundlyConsulting\HttpClientRateLimits\Store\InMemoryStore;
+use RoundlyConsulting\Sentinel\Contracts\InspectsNonces;
+use RoundlyConsulting\Sentinel\Contracts\NonceStore;
 use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Webhooks\Accessors\HandlerRegistry;
 use RoundlyConsulting\Webhooks\Accessors\SchemeRegistry;
@@ -152,6 +155,8 @@ final readonly class Doctor
             return [DoctorFinding::error('tables')];
         }
 
+        $inspectsNonces = null;
+
         foreach (ModelSeams::inboundEndpoint()::query()->cursor() as $endpoint) {
             $key = (string) Keys::of($endpoint);
 
@@ -173,6 +178,11 @@ final readonly class Doctor
 
             if ($endpoint->signature_scheme === 'rfc9421' && self::profileWeak($endpoint->scheme_options ?? [])) {
                 $findings[] = DoctorFinding::warning('rfc9421_profile_weak', $key);
+            }
+
+            // The pipeline verifies a nonce unused before committing it: the store must look one up.
+            if ($endpoint->signature_scheme === 'rfc9421' && ! ($inspectsNonces ??= self::nonceStoreInspects())) {
+                $findings[] = DoctorFinding::error('rfc9421_nonce_store', $key);
             }
         }
 
@@ -207,6 +217,23 @@ final readonly class Doctor
             ->count();
 
         return $outbound + $inbound;
+    }
+
+    private static function nonceStoreInspects(): bool
+    {
+        try {
+            return self::inspects(Container::getInstance()->make(NonceStore::class));
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * The optional capability on whatever store the host bound.
+     */
+    private static function inspects(NonceStore $store): bool
+    {
+        return $store instanceof InspectsNonces;
     }
 
     private static function cacheDriver(?string $store): ?string
