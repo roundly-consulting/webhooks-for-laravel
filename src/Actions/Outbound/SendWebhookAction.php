@@ -34,14 +34,15 @@ final readonly class SendWebhookAction
      */
     public function execute(OutboundEndpoint $endpoint, string $eventType, array|Arrayable|JsonSerializable $payload, ?string $id = null): OutboundDelivery
     {
-        $body = OutboundMessages::body($endpoint, $eventType, $payload);
         $publicId = OutboundDeliveries::publicId($endpoint, $id);
+        // Before validating: a repeat after the endpoint was disabled or unsubscribed still
+        // returns the first delivery.
         $existing = $id === null ? null : OutboundDeliveries::existing($publicId);
 
         if ($existing !== null) {
             return $existing;
         }
 
-        return $this->deliveries->store($endpoint, $eventType, $body, $publicId);
+        return $this->deliveries->store($endpoint, $eventType, OutboundMessages::body($endpoint, $eventType, $payload), $publicId);
     }
 }

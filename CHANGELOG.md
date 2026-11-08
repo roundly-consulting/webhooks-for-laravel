@@ -20,6 +20,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   9421) with an `InvalidEndpointException` instead of storing an endpoint whose every delivery
   fails. An RFC 9421 endpoint without a key id is still accepted; `webhooks:doctor` now warns about
   it (`rfc9421_outbound_no_key`).
+- `Webhooks::send(..., id:)` repeated after the endpoint was disabled, deleted or unsubscribed from
+  the type now returns the delivery queued the first time, as documented, instead of throwing
+  `EndpointNotAcceptingException`; `Webhooks::fake()` behaves the same.
 
 ## 1.0.0 - 2026-11-08
 

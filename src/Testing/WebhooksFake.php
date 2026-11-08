@@ -78,6 +78,14 @@ final class WebhooksFake extends WebhooksManager
      */
     public function send(OutboundEndpoint $endpoint, string $eventType, array|Arrayable|JsonSerializable $payload, ?string $id = null): OutboundDelivery
     {
+        // An idempotent repeat returns the first delivery before anything is validated, and
+        // records nothing (production queues nothing).
+        $first = $id === null ? null : $this->firstSend(OutboundDelivery::ID_PREFIX.OutboundDeliveries::publicId($endpoint, $id));
+
+        if ($first !== null) {
+            return $this->pending($first->endpoint, $first->eventType, $first->body, substr($first->webhookId, strlen(OutboundDelivery::ID_PREFIX)));
+        }
+
         return $this->record($endpoint, $eventType, $payload, false, $id);
     }
 
@@ -393,13 +401,28 @@ final class WebhooksFake extends WebhooksManager
 
         $publicId = OutboundDeliveries::publicId($endpoint, $id);
         $owner = $endpoint->owner;
-        $repeat = $id !== null && array_filter($this->sent, static fn (SentWebhook $sent): bool => $sent->webhookId === OutboundDelivery::ID_PREFIX.$publicId) !== [];
 
-        // An idempotent repeat queues nothing in production: nothing is recorded either.
-        if (! $repeat) {
-            $this->sent[] = new SentWebhook($endpoint, $eventType, is_array($data) ? $data : [], $body, $broadcast, $owner instanceof Model ? $owner : null, OutboundDelivery::ID_PREFIX.$publicId);
+        $this->sent[] = new SentWebhook($endpoint, $eventType, is_array($data) ? $data : [], $body, $broadcast, $owner instanceof Model ? $owner : null, OutboundDelivery::ID_PREFIX.$publicId);
+
+        return $this->pending($endpoint, $eventType, $body, $publicId);
+    }
+
+    private function firstSend(string $webhookId): ?SentWebhook
+    {
+        foreach ($this->sent as $sent) {
+            if ($sent->webhookId === $webhookId) {
+                return $sent;
+            }
         }
 
+        return null;
+    }
+
+    /**
+     * An unsaved delivery as production would have queued it.
+     */
+    private function pending(OutboundEndpoint $endpoint, string $eventType, string $body, string $publicId): OutboundDelivery
+    {
         $class = ModelSeams::outboundDelivery();
         $delivery = new $class;
         $delivery->forceFill([

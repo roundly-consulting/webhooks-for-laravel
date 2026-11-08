@@ -19,6 +19,7 @@ use RoundlyConsulting\HttpClientRateLimits\RateLimitManager;
 use RoundlyConsulting\Sentinel\Jobs\Middleware\Idempotent;
 use RoundlyConsulting\Webhooks\Actions\Outbound\AttemptDeliveryAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\DisableOutboundEndpointAction;
+use RoundlyConsulting\Webhooks\DataTransferObjects\OutboundEndpointChanges;
 use RoundlyConsulting\Webhooks\Enums\AttemptError;
 use RoundlyConsulting\Webhooks\Enums\DisableReason;
 use RoundlyConsulting\Webhooks\Enums\OutboundStatus;
@@ -585,6 +586,27 @@ it('fake_records_an_idempotent_send_once', function (): void {
     expect($repeat->webhookId())->toBe($first->webhookId());
     $fake->assertSentTimes(1, 'invoice.paid');
 });
+
+it('returns the first delivery for a repeat after the endpoint stopped accepting it', function (bool $faked, string $stop): void {
+    $endpoint = outboundEndpoint(events: ['invoice.*']);
+    $fake = $faked ? Webhooks::fake() : null;
+    $first = Webhooks::send($endpoint, 'invoice.paid', ['invoice' => 1], id: 'evt-1');
+
+    match ($stop) {
+        'disabled' => Webhooks::outbound()->disable($endpoint),
+        'unsubscribed' => Webhooks::outbound()->update($endpoint, new OutboundEndpointChanges(events: ['order.*'])),
+    };
+    $repeat = Webhooks::send($endpoint->refresh(), 'invoice.paid', ['invoice' => 1], id: 'evt-1');
+
+    expect($repeat->webhookId())->toBe($first->webhookId());
+
+    if ($fake === null) {
+        expect($repeat->is($first))->toBeTrue();
+        Queue::assertPushed(DeliverWebhook::class, 1);
+    } else {
+        $fake->assertSentTimes(1, 'invoice.paid');
+    }
+})->with(['production' => false, 'fake' => true])->with(['disabled', 'unsubscribed']);
 
 it('an_idempotent_send_racing_its_twin_returns_the_twin', function (): void {
     $endpoint = outboundEndpoint();
