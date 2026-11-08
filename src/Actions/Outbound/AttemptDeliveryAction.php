@@ -42,6 +42,7 @@ use RoundlyConsulting\Webhooks\Support\DestinationPolicyFactory;
 use RoundlyConsulting\Webhooks\Support\Keys;
 use RoundlyConsulting\Webhooks\Support\MacEngine;
 use RoundlyConsulting\Webhooks\Support\ModelSeams;
+use RoundlyConsulting\Webhooks\Support\ResponseSink;
 use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
 
 /**
@@ -52,7 +53,7 @@ use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
  *  3. throttle per endpoint (http-client-rate-limits), before any DNS lookup; a throttle parks
  *     the row and consumes no attempt;
  *  4. vet + pin the destination on every hop (safe-fetch), sign with a fresh timestamp, POST the
- *     stored body, read a capped answer;
+ *     stored body, read a capped answer (guard off: through a capped sink) and flag a cut;
  *  5. record the attempt and classify: 2xx succeeds, 410 disables, a blocked destination fails
  *     for good, anything else retries with backoff (Retry-After honoured) until `max_attempts`.
  *
@@ -179,9 +180,11 @@ final readonly class AttemptDeliveryAction
             ->withHeaders([...($endpoint->headers ?? []), 'User-Agent' => WebhooksConfig::userAgent()]);
 
         $request = $this->sign($request, $delivery, $endpoint, $body);
+        // Guarded: safe-fetch reads at most max_response_bytes. Unguarded: a sink keeps one byte
+        // more (that byte says "truncated") and discards the rest — never the whole answer in memory.
         $request = WebhooksConfig::ssrfEnabled()
             ? $this->safeFetch->guard($request, $this->policies->make())
-            : $request->withoutRedirecting();
+            : $request->withoutRedirecting()->withOptions(['sink' => ResponseSink::open(WebhooksConfig::maxResponseBytes() + 1)]);
 
         return $request->withBody($body, 'application/json')->post($endpoint->url);
     }
@@ -222,9 +225,12 @@ final readonly class AttemptDeliveryAction
             default => AttemptError::HttpStatus,
         };
 
+        $excerpt = BodyReader::read($response->toPsrResponse()->getBody(), WebhooksConfig::maxResponseBytes());
+
         return new AttemptOutcome(
             $status,
-            BodyReader::excerpt($response->body()),
+            $excerpt->text,
+            $excerpt->truncated || $this->safeFetch->truncated($response),
             $this->container->make(RateLimitManager::class)->retryAfter($response),
             is_string($remote) && $remote !== '' ? $remote : null,
             $error,
@@ -249,6 +255,7 @@ final readonly class AttemptDeliveryAction
             'duration_ms' => $outcome->durationMs,
             'response_status' => $outcome->status,
             'response_body' => $outcome->responseBody,
+            'response_truncated' => $outcome->truncated,
             'retry_after_seconds' => $outcome->retryAfter,
             'remote_address' => $outcome->remoteAddress,
             'error_code' => $outcome->error,
@@ -352,7 +359,7 @@ final readonly class AttemptDeliveryAction
 
     private static function failure(AttemptError $error, string $message, bool $terminal, int|float $clock): AttemptOutcome
     {
-        return new AttemptOutcome(null, null, null, null, $error, $message, $terminal, self::elapsed($clock));
+        return new AttemptOutcome(null, null, false, null, null, $error, $message, $terminal, self::elapsed($clock));
     }
 
     /**

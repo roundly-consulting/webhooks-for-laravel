@@ -30,7 +30,8 @@ Initial public release.
   `Webhooks::for($owner)->broadcast()`: an envelope signed with the default scheme (both secrets
   during a rotation), retries with exponential backoff and jitter honouring `Retry-After` (8
   attempts over about 24 hours by default), per-endpoint throttling through
-  http-client-rate-limits, connect / total timeouts, a capped answer, auto-disable after
+  http-client-rate-limits, connect / total timeouts, an answer read only up to `outbound.max_response_bytes` with the SSRF
+  guard on or off (`response_truncated` on the attempt when cut), auto-disable after
   consecutive failed deliveries or a 410 (`EndpointDisabled`), manual redelivery.
 - **SSRF protection** through safe-fetch-for-laravel — https only by default, every resolved
   address vetted against the private, loopback, link-local, metadata and reserved ranges, the

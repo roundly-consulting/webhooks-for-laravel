@@ -17,6 +17,18 @@ if (is_string($log) && $log !== '') {
     ])."\n", FILE_APPEND | LOCK_EX);
 }
 
+// `/big/<bytes>`: a 200 streaming that many bytes, flushed in 64 KiB chunks (no Content-Length).
+if (preg_match('#^/big/(\d+)#', $_SERVER['REQUEST_URI'] ?? '', $big) === 1) {
+    header('Content-Type: text/plain');
+
+    for ($left = (int) $big[1]; $left > 0; $left -= 65536) {
+        echo str_repeat('b', min(65536, $left));
+        flush();
+    }
+
+    return;
+}
+
 $status = preg_match('#^/status/(\d{3})#', $_SERVER['REQUEST_URI'] ?? '', $match) === 1 ? (int) $match[1] : 200;
 http_response_code($status);
 header('Content-Type: text/plain');

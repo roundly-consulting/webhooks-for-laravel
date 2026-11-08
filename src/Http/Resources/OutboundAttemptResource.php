@@ -29,6 +29,7 @@ final class OutboundAttemptResource extends JsonResource
             'started_at' => $attempt->started_at->toIso8601ZuluString(),
             'duration_ms' => $attempt->duration_ms,
             'response_status' => $attempt->response_status,
+            'response_truncated' => $attempt->response_truncated,
             'error_code' => $attempt->error_code?->value,
             'error_message' => $attempt->error_message,
             'retry_after_seconds' => $attempt->retry_after_seconds,

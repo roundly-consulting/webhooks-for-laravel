@@ -18,7 +18,7 @@ use RoundlyConsulting\Webhooks\Support\ModelSeams;
 use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
 
 /**
- * One HTTP attempt of an outbound delivery: when, how long, what came back (a capped excerpt),
+ * One HTTP attempt of an outbound delivery: when, how long, what came back (a capped excerpt, flagged when cut),
  * and why it failed — never a secret, never a vendor's exception message.
  *
  * @property int|string $id
@@ -30,6 +30,7 @@ use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
  * @property int|null $duration_ms
  * @property int|null $response_status
  * @property string|null $response_body
+ * @property bool $response_truncated
  * @property int|null $retry_after_seconds
  * @property string|null $remote_address
  * @property AttemptError|null $error_code
@@ -77,6 +78,7 @@ class OutboundAttempt extends Model
             'started_at' => UtcDateTime::class,
             'duration_ms' => 'integer',
             'response_status' => 'integer',
+            'response_truncated' => 'boolean',
             'retry_after_seconds' => 'integer',
             'error_code' => AttemptError::class,
             'next_attempt_at' => UtcDateTime::class,

@@ -16,6 +16,7 @@ final readonly class AttemptOutcome
     public function __construct(
         public ?int $status,
         public ?string $responseBody,
+        public bool $truncated,
         public ?int $retryAfter,
         public ?string $remoteAddress,
         public ?AttemptError $error,

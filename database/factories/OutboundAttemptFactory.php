@@ -34,6 +34,7 @@ final class OutboundAttemptFactory extends Factory
             'started_at' => now(),
             'duration_ms' => 12,
             'response_status' => 200,
+            'response_truncated' => false,
         ];
     }
 }

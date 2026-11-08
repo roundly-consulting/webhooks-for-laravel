@@ -103,3 +103,25 @@ it('a_redirect_to_a_private_ip_is_blocked_on_the_wire', function (): void {
     expect($this->receiver->requests())->toHaveCount(1)
         ->and($delivery->status)->not->toBe(OutboundStatus::Succeeded);
 });
+
+it('guard_off_reads_at_most_max_response_bytes', function (): void {
+    config()->set('webhooks.ssrf.enabled', false);
+    $endpoint = Webhooks::outbound()->create("http://127.0.0.1:{$this->receiver->port}/big/5000000")->endpoint;
+    $delivery = Webhooks::send($endpoint, 'invoice.paid', ['invoice' => 42]);
+
+    gc_collect_cycles();
+    $baseline = memory_get_usage();
+    memory_reset_peak_usage();
+
+    $delivery = attempt($delivery);
+
+    $peak = memory_get_peak_usage() - $baseline;
+    $attempt = OutboundAttempt::query()->sole();
+
+    expect($delivery->status)->toBe(OutboundStatus::Succeeded)
+        ->and($attempt->response_truncated)->toBeTrue()
+        ->and(strlen((string) $attempt->response_body))->toBe(4096)
+        ->and($attempt->remote_address)->toBe('127.0.0.1')
+        // A 5 MB answer never lands in the worker's memory.
+        ->and($peak)->toBeLessThan(2 * 1024 * 1024);
+});

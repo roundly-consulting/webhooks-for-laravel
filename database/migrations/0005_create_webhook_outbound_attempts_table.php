@@ -29,6 +29,7 @@ return new class extends Migration
             $table->unsignedInteger('duration_ms')->nullable();
             $table->unsignedSmallInteger('response_status')->nullable();
             $table->text('response_body')->nullable();
+            $table->boolean('response_truncated')->default(false);
             $table->unsignedInteger('retry_after_seconds')->nullable();
             $table->string('remote_address', 45)->nullable();
             $table->string('error_code', 32)->nullable();

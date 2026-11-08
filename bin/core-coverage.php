@@ -17,6 +17,8 @@ $core = [
     'src/Support/DestinationPolicyFactory.php',
     'src/Support/OutboundUrls.php',
     'src/Actions/Outbound/AttemptDeliveryAction.php',
+    'src/Support/BodyReader.php',
+    'src/Support/ResponseSink.php',
 ];
 
 $clover = simplexml_load_file($argv[1] ?? 'build/clover.xml');
