@@ -6,6 +6,7 @@ use Carbon\CarbonImmutable;
 use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Psr7\Request as PsrRequest;
 use Illuminate\Contracts\Queue\Job;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -583,4 +584,35 @@ it('fake_records_an_idempotent_send_once', function (): void {
 
     expect($repeat->webhookId())->toBe($first->webhookId());
     $fake->assertSentTimes(1, 'invoice.paid');
+});
+
+it('an_idempotent_send_racing_its_twin_returns_the_twin', function (): void {
+    $endpoint = outboundEndpoint();
+    $publicId = OutboundDeliveries::publicId($endpoint, 'race');
+    $twin = null;
+
+    // The twin lands between the duplicate check and the insert — another worker's send.
+    DB::listen(function ($query) use (&$twin, $endpoint, $publicId): void {
+        if ($twin === null && str_starts_with(strtolower($query->sql), 'select') && str_contains($query->sql, 'public_id')) {
+            $twin = OutboundDelivery::factory()->create(['endpoint_id' => $endpoint->getKey(), 'public_id' => $publicId]);
+        }
+    });
+
+    DB::transaction(function () use ($endpoint, &$twin): void {
+        $delivery = Webhooks::send($endpoint, 'invoice.paid', [], id: 'race');
+
+        expect($delivery->is($twin))->toBeTrue();
+    });
+
+    expect(OutboundDelivery::query()->count())->toBe(1);
+    Queue::assertNothingPushed();
+});
+
+it('a_unique_violation_that_is_not_a_twin_is_thrown', function (): void {
+    $endpoint = outboundEndpoint();
+    OutboundDelivery::creating(static function (): void {
+        throw new UniqueConstraintViolationException('testing', 'insert', [], new RuntimeException('duplicate'));
+    });
+
+    expect(fn () => Webhooks::send($endpoint, 'invoice.paid', []))->toThrow(UniqueConstraintViolationException::class);
 });

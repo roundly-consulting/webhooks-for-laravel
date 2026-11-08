@@ -163,3 +163,10 @@ it('doctor_json_output_is_machine_readable', function (): void {
     config()->set('webhooks.schedule.enabled', false);
     $this->artisan('webhooks:doctor', ['--json' => true])->assertSuccessful();
 });
+
+it('doctor_flags_an_rfc9421_endpoint_whose_ring_does_not_read', function (): void {
+    config()->set('sentinel.signatures.profiles.broken', ['ring' => 'no-such-ring', 'components' => ['@method']]);
+    $endpoint = inboundEndpoint(['signature_scheme' => 'rfc9421', 'scheme_options' => ['profile' => 'broken']]);
+
+    expect(doctorFinding('rfc9421_no_key')?->detail)->toBe((string) $endpoint->getKey());
+});
