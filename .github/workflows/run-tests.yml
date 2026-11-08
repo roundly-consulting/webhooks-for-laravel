@@ -3,6 +3,15 @@ name: run-tests
 on:
   workflow_dispatch:
 
+# safe-fetch-for-laravel is not on Packagist yet: composer clones it from the private repo with the
+# repository secret PRIVATE_REPOS_TOKEN (a read-only `Contents` PAT on that repo). Both the env and
+# the secret go the day safe-fetch publishes and the require becomes "^1.0".
+env:
+  COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets.PRIVATE_REPOS_TOKEN }}"}}'
+  # The real-network tests (php -S + real curl) prove the pinning options pass Guzzle's
+  # CurlFactory; on CI a skip is a failure.
+  WEBHOOKS_REQUIRE_NETWORK_TESTS: 1
+
 jobs:
   test:
     runs-on: ${{ matrix.os }}
@@ -41,104 +50,138 @@ jobs:
         run: composer show -D
 
       - name: Execute tests
-        run: vendor/bin/pest --coverage --min=90
+        run: vendor/bin/pest --coverage --min=95 --coverage-clover=build/clover.xml
 
-  # Real-engine legs: uncomment when the package ships migrations.
-  # test-pgsql:
-  #   runs-on: ubuntu-latest
-  #   name: P8.4 - pgsql real-engine
-  #
-  #   steps:
-  #     # Started first so the engine boots while PHP installs. tmpfs + durability off: the same
-  #     # planner, isolation levels, locks and limits — nothing a test leg proves needs fsync.
-  #     - name: Start postgres
-  #       run: >-
-  #         docker run -d --name postgres --tmpfs /var/lib/postgresql/data
-  #         -e POSTGRES_DB=testing -e POSTGRES_USER=testing -e POSTGRES_PASSWORD=secret
-  #         -p 5432:5432 postgres:16
-  #         -c fsync=off -c synchronous_commit=off -c full_page_writes=off
-  #
-  #     - name: Checkout code
-  #       uses: actions/checkout@v7
-  #
-  #     - name: Setup PHP
-  #       uses: shivammathur/setup-php@v2
-  #       with:
-  #         php-version: 8.4
-  #         extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, pgsql, pdo_pgsql, bcmath, intl, fileinfo
-  #         coverage: none
-  #
-  #     - name: Install dependencies
-  #       run: composer update --prefer-stable --prefer-dist --no-interaction
-  #
-  #     # The image's init server listens on the socket only, so a TCP answer means the real one is up.
-  #     - name: Wait for postgres
-  #       run: |
-  #         for _ in $(seq 1 90); do
-  #           docker exec postgres psql -h 127.0.0.1 -U testing -d testing -c 'select 1' >/dev/null 2>&1 && exit 0
-  #           sleep 1
-  #         done
-  #         docker logs postgres
-  #         exit 1
-  #
-  #     - name: Execute tests against postgres
-  #       env:
-  #         # TESTING_DB_DRIVER is what moves the suite off sqlite; the location vars alone only
-  #         # say where the engine is.
-  #         TESTING_DB_DRIVER: pgsql
-  #         TESTING_DB_HOST: 127.0.0.1
-  #         TESTING_DB_PORT: 5432
-  #         TESTING_DB_DATABASE: testing
-  #         TESTING_DB_USERNAME: testing
-  #         TESTING_DB_PASSWORD: secret
-  #       # Coverage is enforced on the sqlite matrix; this is a correctness leg. Parallel
-  #       # workers each get their own database (testing-for-laravel's DriverMatrix).
-  #       run: vendor/bin/pest --ci --parallel
-  #
-  # test-mysql:
-  #   runs-on: ubuntu-latest
-  #   name: P8.4 - mysql real-engine
-  #
-  #   steps:
-  #     # Started first, tmpfs datadir, binlog off and no flush per commit — the same InnoDB,
-  #     # isolation levels, locking and limits. performance_schema stays on: race tests read
-  #     # data_lock_waits.
-  #     - name: Start mysql
-  #       run: >-
-  #         docker run -d --name mysql --tmpfs /var/lib/mysql
-  #         -e MYSQL_DATABASE=testing -e MYSQL_ROOT_PASSWORD=secret
-  #         -p 3306:3306 mysql:8
-  #         --skip-log-bin --sync-binlog=0 --innodb-flush-log-at-trx-commit=0 --innodb-doublewrite=OFF
-  #
-  #     - name: Checkout code
-  #       uses: actions/checkout@v7
-  #
-  #     - name: Setup PHP
-  #       uses: shivammathur/setup-php@v2
-  #       with:
-  #         php-version: 8.4
-  #         extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, mysql, pdo_mysql, bcmath, intl, fileinfo
-  #         coverage: none
-  #
-  #     - name: Install dependencies
-  #       run: composer update --prefer-stable --prefer-dist --no-interaction
-  #
-  #     # The image's init server runs with networking off, so a TCP answer means the real one is up.
-  #     - name: Wait for mysql
-  #       run: |
-  #         for _ in $(seq 1 90); do
-  #           docker exec mysql mysql -h 127.0.0.1 -uroot -psecret -e 'select 1' testing >/dev/null 2>&1 && exit 0
-  #           sleep 1
-  #         done
-  #         docker logs mysql
-  #         exit 1
-  #
-  #     - name: Execute tests against mysql
-  #       env:
-  #         TESTING_DB_DRIVER: mysql
-  #         TESTING_DB_HOST: 127.0.0.1
-  #         TESTING_DB_PORT: 3306
-  #         TESTING_DB_DATABASE: testing
-  #         TESTING_DB_USERNAME: root
-  #         TESTING_DB_PASSWORD: secret
-  #       run: vendor/bin/pest --ci --parallel
+      - name: Security core fully covered
+        run: php bin/core-coverage.php build/clover.xml
+
+  # illuminate/http allows Guzzle ^7.8.2 || ^8.0: hosts may resolve either major, and Guzzle 7
+  # treats raw curl options differently — the outbound suite and the real-network tests run here too.
+  guzzle-7:
+    runs-on: ubuntu-latest
+    name: P8.4 - L13.* - Guzzle 7
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.4
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, bcmath, intl, fileinfo
+          coverage: none
+
+      - name: Install dependencies
+        run: |
+          # CI-time only, never committed.
+          composer require --dev "guzzlehttp/guzzle:^7.8.2" -W --no-interaction --no-update
+          composer update --prefer-stable --prefer-dist --no-interaction
+
+      - name: Assert Guzzle 7
+        run: |
+          version="$(composer show guzzlehttp/guzzle --format=json | php -r 'echo json_decode(stream_get_contents(STDIN), true)["versions"][0];')"
+          echo "guzzlehttp/guzzle ${version}"
+          case "${version}" in 7.*) ;; *) echo "expected Guzzle 7, got ${version}"; exit 1 ;; esac
+
+      - name: Execute tests
+        run: vendor/bin/pest --ci tests/Network tests/Feature/Outbound tests/Acceptance
+
+  test-pgsql:
+    runs-on: ubuntu-latest
+    name: P8.4 - pgsql real-engine
+
+    steps:
+      # Started first so the engine boots while PHP installs. tmpfs + durability off: the same
+      # planner, isolation levels, locks and limits — nothing a test leg proves needs fsync.
+      - name: Start postgres
+        run: >-
+          docker run -d --name postgres --tmpfs /var/lib/postgresql/data
+          -e POSTGRES_DB=testing -e POSTGRES_USER=testing -e POSTGRES_PASSWORD=secret
+          -p 5432:5432 postgres:16
+          -c fsync=off -c synchronous_commit=off -c full_page_writes=off
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.4
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, pgsql, pdo_pgsql, bcmath, intl, fileinfo
+          coverage: none
+
+      - name: Install dependencies
+        run: composer update --prefer-stable --prefer-dist --no-interaction
+
+      # The image's init server listens on the socket only, so a TCP answer means the real one is up.
+      - name: Wait for postgres
+        run: |
+          for _ in $(seq 1 90); do
+            docker exec postgres psql -h 127.0.0.1 -U testing -d testing -c 'select 1' >/dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          docker logs postgres
+          exit 1
+
+      - name: Execute tests against postgres
+        env:
+          # TESTING_DB_DRIVER is what moves the suite off sqlite; the location vars alone only
+          # say where the engine is.
+          TESTING_DB_DRIVER: pgsql
+          TESTING_DB_HOST: 127.0.0.1
+          TESTING_DB_PORT: 5432
+          TESTING_DB_DATABASE: testing
+          TESTING_DB_USERNAME: testing
+          TESTING_DB_PASSWORD: secret
+        # Coverage is enforced on the sqlite matrix; this is a correctness leg. Parallel
+        # workers each get their own database (testing-for-laravel's DriverMatrix).
+        run: vendor/bin/pest --ci --parallel
+
+  test-mysql:
+    runs-on: ubuntu-latest
+    name: P8.4 - mysql real-engine
+
+    steps:
+      # Started first, tmpfs datadir, binlog off and no flush per commit — the same InnoDB,
+      # isolation levels, locking and limits. performance_schema stays on: race tests read
+      # data_lock_waits.
+      - name: Start mysql
+        run: >-
+          docker run -d --name mysql --tmpfs /var/lib/mysql
+          -e MYSQL_DATABASE=testing -e MYSQL_ROOT_PASSWORD=secret
+          -p 3306:3306 mysql:8
+          --skip-log-bin --sync-binlog=0 --innodb-flush-log-at-trx-commit=0 --innodb-doublewrite=OFF
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.4
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, mysql, pdo_mysql, bcmath, intl, fileinfo
+          coverage: none
+
+      - name: Install dependencies
+        run: composer update --prefer-stable --prefer-dist --no-interaction
+
+      # The image's init server runs with networking off, so a TCP answer means the real one is up.
+      - name: Wait for mysql
+        run: |
+          for _ in $(seq 1 90); do
+            docker exec mysql mysql -h 127.0.0.1 -uroot -psecret -e 'select 1' testing >/dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          docker logs mysql
+          exit 1
+
+      - name: Execute tests against mysql
+        env:
+          TESTING_DB_DRIVER: mysql
+          TESTING_DB_HOST: 127.0.0.1
+          TESTING_DB_PORT: 3306
+          TESTING_DB_DATABASE: testing
+          TESTING_DB_USERNAME: root
+          TESTING_DB_PASSWORD: secret
+        run: vendor/bin/pest --ci --parallel
