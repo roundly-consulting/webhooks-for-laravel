@@ -39,8 +39,9 @@ use Throwable;
  *  1. key shape (404) · 2. endpoint lookup — unknown, deleted and disabled all 404 ·
  *  3. rejection guard per endpoint + IP (429) · 4. size (413) · 5. content type (415) ·
  *  5b. per-endpoint limit on verified deliveries (429 — checked here, spent only by a verified
- *  delivery) · 6. signature + timestamp (401) · 7. JSON decode, arrays only (400) ·
- *  8. replay / idempotency (200 duplicate or 409) · 9. store + queue → 202.
+ *  delivery) · 6. signature + timestamp (401; an RFC 9421 nonce checked unused, not yet
+ *  recorded) · 7. JSON decode, arrays only (400) · 8. replay / idempotency (200 duplicate or
+ *  409) · 9. store + commit the nonce (a copy that lost it: replayed) + queue → 202.
  *
  * Size and content type run before the signature, so an unauthenticated caller cannot make the
  * app compute MACs over megabytes. The delivery limit runs before it too: a signature verified
@@ -105,13 +106,10 @@ final readonly class ReceiveWebhookAction
         }
 
         try {
-            $verified = $this->verify->execute($endpoint, $request, $body);
+            // Its single use (an RFC 9421 nonce) is committed only with the stored delivery.
+            $verified = $this->verify->execute($endpoint, $request, $body, deferCommit: true);
         } catch (WebhookSignatureException $exception) {
-            if ($exception->reason() === RejectionReason::Replayed && $this->replayOfStored($endpoint, $request)) {
-                return $this->duplicate();
-            }
-
-            return $this->refuse($endpoint, $request, $exception->reason());
+            return $this->signatureRefused($endpoint, $request, $exception);
         }
 
         $this->limiter->hitDelivery(Keys::of($endpoint));
@@ -137,6 +135,10 @@ final readonly class ReceiveWebhookAction
             return Problem::response(RejectionReason::InProgress, ['Retry-After' => '1']);
         } catch (PayloadSanitizerException) {
             return Problem::response(RejectionReason::SanitizerFailed);
+        } catch (WebhookSignatureException $exception) {
+            // A concurrent copy committed the nonce first (or the window closed meanwhile): this
+            // copy stored nothing, and is answered like any replay.
+            return $this->signatureRefused($endpoint, $request, $exception);
         } catch (IdempotentResponseUnavailableException $exception) {
             // An earlier request stored the delivery but the store could not keep its result:
             // the retry is a duplicate when the delivery is there.
@@ -233,6 +235,19 @@ final readonly class ReceiveWebhookAction
     private static function outcome(IdempotentResult $result): AcceptedDelivery
     {
         return AcceptedDelivery::fromStored($result->value, $result->replayed);
+    }
+
+    /**
+     * A replayed request is a duplicate when its delivery is stored (O-1); every other refusal
+     * counts against the rejection guard.
+     */
+    private function signatureRefused(InboundEndpoint $endpoint, Request $request, WebhookSignatureException $exception): Response
+    {
+        if ($exception->reason() === RejectionReason::Replayed && $this->replayOfStored($endpoint, $request)) {
+            return $this->duplicate();
+        }
+
+        return $this->refuse($endpoint, $request, $exception->reason());
     }
 
     private function duplicate(): Response

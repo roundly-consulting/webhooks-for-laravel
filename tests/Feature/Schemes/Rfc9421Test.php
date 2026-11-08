@@ -5,13 +5,22 @@ declare(strict_types=1);
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Testing\TestResponse;
+use RoundlyConsulting\Sentinel\DataTransferObjects\DeferredSignature;
+use RoundlyConsulting\Sentinel\DataTransferObjects\VerifiedSignature;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
+use RoundlyConsulting\Sentinel\Enums\Algorithm as SentinelAlgorithm;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
+use RoundlyConsulting\Sentinel\Http\Signatures\SignatureVerifier;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
+use RoundlyConsulting\Webhooks\Contracts\PayloadSanitizer;
 use RoundlyConsulting\Webhooks\DataTransferObjects\InboundEndpointOptions;
 use RoundlyConsulting\Webhooks\DataTransferObjects\OutboundEndpointOptions;
+use RoundlyConsulting\Webhooks\DataTransferObjects\SanitizeContext;
+use RoundlyConsulting\Webhooks\DataTransferObjects\SignedRequestData;
 use RoundlyConsulting\Webhooks\Enums\AttemptError;
 use RoundlyConsulting\Webhooks\Enums\OutboundStatus;
+use RoundlyConsulting\Webhooks\Exceptions\WebhookSignatureException;
 use RoundlyConsulting\Webhooks\Facades\Webhooks;
 use RoundlyConsulting\Webhooks\Models\InboundDelivery;
 use RoundlyConsulting\Webhooks\Models\InboundEndpoint;
@@ -90,10 +99,10 @@ it('an_rfc9421_replay_of_an_unstored_request_is_refused', function (): void {
         $server[strtoupper(str_replace('-', '_', $name)) === 'CONTENT_TYPE' ? 'CONTENT_TYPE' : 'HTTP_'.strtoupper(str_replace('-', '_', $name))] = $value;
     }
 
-    // Verified (nonce remembered), then refused at the decode step: nothing stored…
+    // Verified, then refused at the decode step: nothing stored, and the nonce never committed…
     $this->call('POST', $signed->uri, [], [], [], $server, $signed->body)->assertStatus(400);
-    // …so the resend is not a silent "200 duplicate".
-    $this->call('POST', $signed->uri, [], [], [], $server, $signed->body)->assertStatus(401)->assertJson(['code' => 'replayed']);
+    // …so the resend is judged again on its own merits — never a silent "200 duplicate".
+    $this->call('POST', $signed->uri, [], [], [], $server, $signed->body)->assertStatus(400)->assertJson(['code' => 'invalid_payload']);
 });
 
 it('falls back to the signed nonce when there is no id header', function (): void {
@@ -227,4 +236,129 @@ it('keeps two RFC 9421 deliveries with the same body under an unsigned id apart'
     $post($first)->assertStatus(200)->assertJson(['status' => 'duplicate']);
 
     expect(InboundDelivery::query()->pluck('idempotency_key')->sort()->values()->all())->toBe(['d-1', 'd-2']);
+});
+
+/**
+ * POST a built RFC 9421 request byte for byte, as a sender's retry layer would resend it.
+ */
+function resendRfc9421(SignedRequestData $signed): TestResponse
+{
+    $server = ['CONTENT_TYPE' => 'application/json'];
+
+    foreach ($signed->headers as $name => $value) {
+        $server[strtoupper(str_replace('-', '_', $name)) === 'CONTENT_TYPE' ? 'CONTENT_TYPE' : 'HTTP_'.strtoupper(str_replace('-', '_', $name))] = $value;
+    }
+
+    return test()->call('POST', $signed->uri, [], [], [], $server, $signed->body);
+}
+
+it('accepts the unchanged resend of an RFC 9421 delivery refused with 400 after verification', function (): void {
+    $endpoint = rfc9421Endpoint(options: ['id_header' => 'x-none']);
+    config()->set('webhooks.inbound.accept_idempotency_header', false);
+    $signed = SignedWebhookRequest::for($endpoint)->keyId('partner')->idempotencyKey('order-7')->toRequest();
+
+    // Verified, then no usable id (the host does not take Idempotency-Key yet): 400.
+    resendRfc9421($signed)->assertStatus(400)->assertJson(['code' => 'missing_id']);
+
+    // Fixed on this side: the sender's identical retry, nonce and all, is accepted.
+    config()->set('webhooks.inbound.accept_idempotency_header', true);
+    resendRfc9421($signed)->assertStatus(202);
+
+    expect(InboundDelivery::query()->sole()->idempotency_key)->toBe('order-7');
+});
+
+it('accepts the unchanged resend of an RFC 9421 delivery after a sanitizer 500', function (): void {
+    $endpoint = rfc9421Endpoint();
+    $signed = SignedWebhookRequest::for($endpoint)->keyId('partner')->toRequest();
+    app()->bind(PayloadSanitizer::class, fn () => new class implements PayloadSanitizer
+    {
+        public static bool $down = true;
+
+        public function sanitize(array $payload, SanitizeContext $context): array
+        {
+            return self::$down ? throw new RuntimeException('sanitizer down') : $payload;
+        }
+    });
+
+    resendRfc9421($signed)->assertStatus(500)->assertJson(['code' => 'sanitizer_failed']);
+    app(PayloadSanitizer::class)::$down = false;
+
+    resendRfc9421($signed)->assertStatus(202);
+    expect(InboundDelivery::query()->count())->toBe(1);
+});
+
+it('accepts the unchanged resend of an RFC 9421 delivery whose row could not be stored', function (): void {
+    $endpoint = rfc9421Endpoint();
+    $signed = SignedWebhookRequest::for($endpoint)->keyId('partner')->toRequest();
+    $down = true;
+    InboundDelivery::creating(function () use (&$down): void {
+        if ($down) {
+            $down = false;
+
+            throw new RuntimeException('database gone');
+        }
+    });
+
+    resendRfc9421($signed)->assertStatus(500);
+    expect(InboundDelivery::query()->count())->toBe(0);
+
+    resendRfc9421($signed)->assertStatus(202);
+    expect(InboundDelivery::query()->count())->toBe(1);
+});
+
+it('commits the nonce of a stored delivery only, through sentinel', function (): void {
+    $endpoint = rfc9421Endpoint();
+    $fake = Sentinel::fake()->fakeVerifiedSignature(new VerifiedSignature(
+        'sig1', 'http', 'partner', SentinelAlgorithm::HmacSha256, time(), null, 'nonce-once', null,
+        ['@method', '@authority', '@path', 'content-digest', 'webhook-id'], $endpoint->getMorphClass(), $endpoint->getKey(),
+    ));
+    $broken = SignedWebhookRequest::for($endpoint)->keyId('partner')->body('not json')->toRequest();
+
+    resendRfc9421($broken)->assertStatus(400);
+    $fake->assertSignatureVerifiedDeferred('default');
+    $fake->assertNonceNotCommitted('partner');
+
+    resendRfc9421(SignedWebhookRequest::for($endpoint)->keyId('partner')->toRequest())->assertStatus(202);
+    $fake->assertNonceCommitted('partner');
+    // Once committed, the same nonce is a replay — answered as a duplicate only if stored (it is).
+    resendRfc9421(SignedWebhookRequest::for($endpoint)->keyId('partner')->toRequest())->assertStatus(401)->assertJson(['code' => 'replayed']);
+});
+
+it('verify() through the facade records the nonce itself', function (): void {
+    $endpoint = rfc9421Endpoint();
+    $signed = SignedWebhookRequest::for($endpoint)->keyId('partner')->toRequest();
+    $request = Request::create($signed->uri, 'POST', [], [], [], [], $signed->body);
+
+    foreach ($signed->headers as $name => $value) {
+        $request->headers->set($name, $value);
+    }
+
+    // A host running its own flow gets a used-up nonce, as before: no deferred commit to forget.
+    expect(Webhooks::inbound()->verify($endpoint, $request)->replayProtected)->toBeTrue()
+        ->and(fn () => Webhooks::inbound()->verify($endpoint, $request))->toThrow(WebhookSignatureException::class);
+});
+
+it('a copy that loses the nonce commit stores nothing and is answered as a replay', function (): void {
+    $endpoint = rfc9421Endpoint(options: ['id_header' => 'x-delivery']);
+    $signature = new VerifiedSignature(
+        'sig1', 'http', 'partner', SentinelAlgorithm::HmacSha256, time(), null, 'nonce-raced', null,
+        ['@method', '@authority', '@path', 'content-digest'], $endpoint->getMorphClass(), $endpoint->getKey(),
+    );
+    $fake = Sentinel::fake()->fakeVerifiedSignature($signature);
+    $won = false;
+
+    // Between this copy's verification and its commit, another copy (another worker) commits
+    // the same nonce first.
+    InboundDelivery::creating(function () use ($signature, &$won): void {
+        if (! $won) {
+            $won = true;
+            Sentinel::commitSignatureNonce(new DeferredSignature($signature, SignatureVerifier::nonceScope('http', 'partner'), time() + 600, 'POST', '/'));
+        }
+    });
+
+    resendRfc9421(SignedWebhookRequest::for($endpoint)->keyId('partner')->withHeader('X-Delivery', 'd-2')->toRequest())
+        ->assertStatus(401)->assertJson(['code' => 'replayed']);
+
+    expect(InboundDelivery::query()->count())->toBe(0);
+    $fake->assertNonceCommitted('partner');
 });

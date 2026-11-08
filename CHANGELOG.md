@@ -17,9 +17,11 @@ Initial public release.
   `Route::webhooks('hooks')`, which also keeps Laravel's input-rewriting middleware off it, or
   `Webhooks::inbound()->receive()`): unknown and disabled keys answer the same 404, a rejection
   guard per endpoint and IP, size (413) and content-type (415) checks before any signature work,
-  a per-endpoint limit on verified deliveries (429 — checked before the signature, so an RFC 9421
-  nonce is never used up by a refusal the sender is asked to retry), signature and timestamp
-  tolerance (401), JSON decoded to arrays only (400), replay and idempotency through sentinel (200
+  a per-endpoint limit on verified deliveries (429, checked before the signature), signature and
+  timestamp tolerance (401; an RFC 9421 nonce is checked unused there but recorded only together
+  with the stored delivery, through sentinel's deferred-nonce API — a request refused after its
+  signature verified, with 400, 500 or a database error, is accepted when resent unchanged, and of
+  two concurrent copies one is stored), JSON decoded to arrays only (400), replay and idempotency through sentinel (200
   duplicate or 409; a body guard for unsigned ids, kept against the stored deliveries when the
   format has no signed timestamp, skipped where a verified RFC 9421 nonce already rules out a
   replay), then the sanitized payload is stored and queued — 202 (also when the idempotency store
@@ -68,7 +70,8 @@ Initial public release.
   written into your app from a recipe). The doctor (`--json` for monitoring) also flags a stalled
   sweep, the schedule switched off, volatile (array) limiter and idempotency stores, a queue
   `retry_after` shorter than the handler timeout, an SQS `max_delay` over 900 seconds, and an RFC
-  9421 profile that turns its nonce or content digest off.
+  9421 profile that turns its nonce or content digest off, and a sentinel nonce store that cannot
+  look a nonce up (`InspectsNonces`).
 - **Testing** — `Webhooks::fake()` recording sends, broadcasts, redeliveries, replays, rotations
   and disables, each with an assertion and a negative (`assertNothingBroadcast()`,
   `assertSecretNotRotated()`, …); `assertSent('invoice.paid', payload: …)` without the endpoint;

@@ -14,6 +14,7 @@ use RoundlyConsulting\Webhooks\DataTransferObjects\VerifiedWebhook;
 use RoundlyConsulting\Webhooks\Enums\Direction;
 use RoundlyConsulting\Webhooks\Enums\InboundStatus;
 use RoundlyConsulting\Webhooks\Exceptions\PayloadSanitizerException;
+use RoundlyConsulting\Webhooks\Exceptions\WebhookSignatureException;
 use RoundlyConsulting\Webhooks\Models\InboundDelivery;
 use RoundlyConsulting\Webhooks\Models\InboundEndpoint;
 use RoundlyConsulting\Webhooks\Support\Clock;
@@ -41,7 +42,7 @@ final readonly class AcceptInboundDeliveryAction
      * @param  array<array-key, mixed>  $payload  the decoded body
      * @param  array<string, string>  $headers  lower-cased request headers
      *
-     * @throws PayloadSanitizerException
+     * @throws PayloadSanitizerException|WebhookSignatureException a copy that lost the commit
      */
     public function execute(InboundEndpoint $endpoint, VerifiedWebhook $verified, string $idempotencyKey, array $payload, array $headers, string $body): AcceptedDelivery
     {
@@ -80,7 +81,16 @@ final readonly class AcceptInboundDeliveryAction
         ]);
 
         try {
-            $delivery->save();
+            // The row and the request's single use (an RFC 9421 nonce) together: a copy that
+            // lost the commit leaves no row, and a row that could not be written uses no nonce.
+            if ($verified->commit === null) {
+                $delivery->save();
+            } else {
+                $delivery->getConnection()->transaction(static function () use ($delivery, $verified): void {
+                    $delivery->save();
+                    $verified->committed();
+                });
+            }
         } catch (UniqueConstraintViolationException) {
             $existing = $this->stored($endpoint, $idempotencyKey);
 

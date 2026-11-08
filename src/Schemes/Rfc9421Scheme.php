@@ -21,7 +21,9 @@ use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
 
 /**
  * RFC 9421 HTTP message signatures, verified by sentinel against a signature profile (its
- * `max_age` / `clock_skew` replace the tolerance, its nonce store the replay check). The key
+ * `max_age` / `clock_skew` replace the tolerance, its nonce store the replay check). The nonce is
+ * verified unused but recorded only through the verdict's `commit` — the pipeline commits once
+ * the delivery is stored, so a request refused after verification can be resent as is. The key
  * must be imported into sentinel bound to **this** endpoint:
  *
  *     Sentinel::keys()->ring('http')->import($kid, Algorithm::Ed25519, $pem, owner: $endpoint);
@@ -45,16 +47,12 @@ final readonly class Rfc9421Scheme implements SignatureScheme
         }
 
         try {
-            $verified = $this->sentinel->signatures()->verify($request->request, self::option($request->schemeOptions, 'profile') ?? WebhooksConfig::rfc9421Profile());
+            $deferred = $this->sentinel->signatures()->verifyDeferred($request->request, self::option($request->schemeOptions, 'profile') ?? WebhooksConfig::rfc9421Profile());
         } catch (HttpSignatureException $exception) {
-            throw WebhookSignatureException::because(match ($exception->reason()) {
-                SignatureRejection::Missing => RejectionReason::MissingSignature,
-                SignatureRejection::Replayed => RejectionReason::Replayed,
-                SignatureRejection::TooOld, SignatureRejection::NotYetValid, SignatureRejection::Expired => RejectionReason::StaleTimestamp,
-                default => RejectionReason::InvalidSignature,
-            });
+            throw self::rejected($exception);
         }
 
+        $verified = $deferred->signature;
         $owner = $this->sentinel->signatures()->owner($verified);
 
         if (! $owner instanceof InboundEndpoint || $owner->url_key !== $request->endpointKey) {
@@ -76,9 +74,26 @@ final readonly class Rfc9421Scheme implements SignatureScheme
             null,
             $signed,
             SecretSlot::Current,
-            // Sentinel remembered the nonce: this exact request can never verify again.
+            // Once committed, sentinel remembers the nonce: this exact request never verifies again.
             replayProtected: $verified->nonce !== null,
+            commit: function () use ($deferred): void {
+                try {
+                    $this->sentinel->signatures()->commitNonce($deferred);
+                } catch (HttpSignatureException $exception) {
+                    throw self::rejected($exception);
+                }
+            },
         );
+    }
+
+    private static function rejected(HttpSignatureException $exception): WebhookSignatureException
+    {
+        return WebhookSignatureException::because(match ($exception->reason()) {
+            SignatureRejection::Missing => RejectionReason::MissingSignature,
+            SignatureRejection::Replayed => RejectionReason::Replayed,
+            SignatureRejection::TooOld, SignatureRejection::NotYetValid, SignatureRejection::Expired => RejectionReason::StaleTimestamp,
+            default => RejectionReason::InvalidSignature,
+        });
     }
 
     /**

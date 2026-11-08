@@ -31,11 +31,15 @@ final readonly class VerifyInboundRequestAction
     ) {}
 
     /**
+     * The request's single use (an RFC 9421 nonce) is recorded here — unless `$deferCommit`: then
+     * the verdict's `commit` is the caller's to run (the pipeline does, once the delivery is
+     * stored).
+     *
      * @param  string|null  $body  the raw body already read (null: read it from the request)
      *
      * @throws WebhookSignatureException
      */
-    public function execute(InboundEndpoint $endpoint, Request $request, ?string $body = null): VerifiedWebhook
+    public function execute(InboundEndpoint $endpoint, Request $request, ?string $body = null, bool $deferCommit = false): VerifiedWebhook
     {
         try {
             $scheme = $this->schemes->resolve($endpoint->signature_scheme);
@@ -66,6 +70,8 @@ final readonly class VerifyInboundRequestAction
             $request,
         );
 
-        return $scheme->verify($incoming, new EndpointSecrets($endpoint->activeSecrets(), $this->container->make(MacEngine::class)));
+        $verified = $scheme->verify($incoming, new EndpointSecrets($endpoint->activeSecrets(), $this->container->make(MacEngine::class)));
+
+        return $deferCommit ? $verified : $verified->committed();
     }
 }
