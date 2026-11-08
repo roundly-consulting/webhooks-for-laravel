@@ -8,6 +8,7 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Str;
 use RoundlyConsulting\Crypto\Facades\Crypto;
 use RoundlyConsulting\Webhooks\Contracts\PayloadSanitizer;
+use RoundlyConsulting\Webhooks\DataTransferObjects\AcceptedDelivery;
 use RoundlyConsulting\Webhooks\DataTransferObjects\SanitizeContext;
 use RoundlyConsulting\Webhooks\DataTransferObjects\VerifiedWebhook;
 use RoundlyConsulting\Webhooks\Enums\Direction;
@@ -39,16 +40,15 @@ final readonly class AcceptInboundDeliveryAction
     /**
      * @param  array<array-key, mixed>  $payload  the decoded body
      * @param  array<string, string>  $headers  lower-cased request headers
-     * @return array{id: string, duplicate: bool}
      *
      * @throws PayloadSanitizerException
      */
-    public function execute(InboundEndpoint $endpoint, VerifiedWebhook $verified, string $idempotencyKey, array $payload, array $headers, string $body): array
+    public function execute(InboundEndpoint $endpoint, VerifiedWebhook $verified, string $idempotencyKey, array $payload, array $headers, string $body): AcceptedDelivery
     {
         $existing = $this->stored($endpoint, $idempotencyKey);
 
         if ($existing !== null) {
-            return ['id' => $existing->public_id, 'duplicate' => true];
+            return new AcceptedDelivery($existing->public_id, true);
         }
 
         $eventType = $verified->eventType ?? (isset($payload['type']) && is_string($payload['type']) ? mb_substr($payload['type'], 0, 191) : null);
@@ -84,13 +84,13 @@ final readonly class AcceptInboundDeliveryAction
         } catch (UniqueConstraintViolationException) {
             $existing = $this->stored($endpoint, $idempotencyKey);
 
-            return ['id' => $existing === null ? '' : $existing->public_id, 'duplicate' => true];
+            return new AcceptedDelivery($existing === null ? '' : $existing->public_id, true);
         }
 
         $endpoint->forceFill(['last_received_at' => $now])->saveQuietly();
         $this->queue($delivery);
 
-        return ['id' => $delivery->public_id, 'duplicate' => false];
+        return new AcceptedDelivery($delivery->public_id, false);
     }
 
     private function stored(InboundEndpoint $endpoint, string $idempotencyKey): ?InboundDelivery

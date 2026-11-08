@@ -13,8 +13,10 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
 use RoundlyConsulting\Crypto\Facades\Crypto;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
+use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Webhooks\Contracts\PayloadSanitizer;
 use RoundlyConsulting\Webhooks\Contracts\SignatureScheme;
+use RoundlyConsulting\Webhooks\DataTransferObjects\AcceptedDelivery;
 use RoundlyConsulting\Webhooks\DataTransferObjects\InboundEndpointOptions;
 use RoundlyConsulting\Webhooks\DataTransferObjects\IncomingWebhook;
 use RoundlyConsulting\Webhooks\DataTransferObjects\SanitizeContext;
@@ -469,4 +471,17 @@ it('a_host_route_can_receive_through_the_manager', function (): void {
 
 it('an_unknown_scheme_answers_401', function (): void {
     postSigned(inboundEndpoint(['signature_scheme' => 'nope']))->assertStatus(401)->assertJson(['code' => 'unknown_scheme']);
+});
+
+it('accepted_delivery_round_trips_through_the_idempotency_store', function (): void {
+    $accepted = new AcceptedDelivery('01JCDEF0000000000000000000', false);
+    $run = fn (): array => $accepted->toStored();
+
+    $first = app(SentinelManager::class)->idempotency()->run('round-trip-key', 'webhooks:test', $run, 'digest', 60);
+    $second = app(SentinelManager::class)->idempotency()->run('round-trip-key', 'webhooks:test', $run, 'digest', 60);
+
+    expect(AcceptedDelivery::fromStored($first->value, $first->replayed))->toEqual($accepted)
+        ->and(AcceptedDelivery::fromStored($second->value, $second->replayed))->toEqual(new AcceptedDelivery($accepted->id, true))
+        ->and(AcceptedDelivery::fromStored('garbage'))->toEqual(new AcceptedDelivery('', false))
+        ->and(AcceptedDelivery::fromStored(['id' => 7, 'duplicate' => 'yes']))->toEqual(new AcceptedDelivery('', false));
 });

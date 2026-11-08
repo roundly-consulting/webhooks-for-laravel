@@ -40,8 +40,8 @@ final readonly class UpdateOutboundEndpointAction
 
         if ($changes->url !== null) {
             $judged = $this->urls->judge($changes->url);
-            $columns['url'] = $judged['url'];
-            $columns['url_host'] = $judged['host'];
+            $columns['url'] = $judged->url;
+            $columns['url_host'] = $judged->host;
         }
 
         if ($changes->events !== null) {

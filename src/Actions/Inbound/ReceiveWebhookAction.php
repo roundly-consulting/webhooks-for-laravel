@@ -12,6 +12,7 @@ use RoundlyConsulting\Sentinel\DataTransferObjects\IdempotentResult;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyKeyReusedException;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyRequestInProgressException;
 use RoundlyConsulting\Sentinel\SentinelManager;
+use RoundlyConsulting\Webhooks\DataTransferObjects\AcceptedDelivery;
 use RoundlyConsulting\Webhooks\DataTransferObjects\VerifiedWebhook;
 use RoundlyConsulting\Webhooks\Enums\DuplicateResponse;
 use RoundlyConsulting\Webhooks\Enums\RejectionReason;
@@ -131,14 +132,14 @@ final readonly class ReceiveWebhookAction
             return Problem::response(RejectionReason::SanitizerFailed);
         }
 
-        if ($result['duplicate']) {
+        if ($result->duplicate) {
             // A duplicate of a delivery stored while the queue was down queues it now.
             $this->accept->requeueStalled($endpoint, $idempotencyKey);
 
             return $this->duplicate();
         }
 
-        return Problem::accepted($result['id']);
+        return Problem::accepted($result->id);
     }
 
     /**
@@ -148,32 +149,26 @@ final readonly class ReceiveWebhookAction
      *
      * @param  array<array-key, mixed>  $payload
      * @param  array<string, string>  $headers
-     * @return array{id: string, duplicate: bool}
      */
-    private function store(InboundEndpoint $endpoint, VerifiedWebhook $verified, string $idempotencyKey, array $payload, array $headers, string $body): array
+    private function store(InboundEndpoint $endpoint, VerifiedWebhook $verified, string $idempotencyKey, array $payload, array $headers, string $body): AcceptedDelivery
     {
         $digest = Crypto::digest()->hex($body);
         $scope = 'webhooks:in:'.Keys::of($endpoint);
         $ttl = WebhooksConfig::dedupeTtl();
-        $accept = fn (): array => $this->accept->execute($endpoint, $verified, $idempotencyKey, $payload, $headers, $body);
-        $run = fn (): array => self::outcome($this->sentinel->idempotency()->run($idempotencyKey, $scope, $accept, $digest, $ttl));
+        // The store keeps plain arrays: converted at this boundary, both ways.
+        $accept = fn (): array => $this->accept->execute($endpoint, $verified, $idempotencyKey, $payload, $headers, $body)->toStored();
+        $run = fn (): array => self::outcome($this->sentinel->idempotency()->run($idempotencyKey, $scope, $accept, $digest, $ttl))->toStored();
 
         if ($verified->idIsSigned) {
-            return $run();
+            return AcceptedDelivery::fromStored($run());
         }
 
         return self::outcome($this->sentinel->idempotency()->run('body:'.$digest, $scope.':body', $run, $digest, $ttl));
     }
 
-    /**
-     * @return array{id: string, duplicate: bool}
-     */
-    private static function outcome(IdempotentResult $result): array
+    private static function outcome(IdempotentResult $result): AcceptedDelivery
     {
-        $value = is_array($result->value) ? $result->value : [];
-        $id = $value['id'] ?? '';
-
-        return ['id' => is_string($id) ? $id : '', 'duplicate' => $result->replayed || ($value['duplicate'] ?? false) === true];
+        return AcceptedDelivery::fromStored($result->value, $result->replayed);
     }
 
     private function duplicate(): Response

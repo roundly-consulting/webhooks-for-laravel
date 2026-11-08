@@ -7,6 +7,7 @@ namespace RoundlyConsulting\Webhooks\Support;
 use RoundlyConsulting\SafeFetch\DataTransferObjects\CanonicalUrl;
 use RoundlyConsulting\SafeFetch\Exceptions\SafeFetchException;
 use RoundlyConsulting\SafeFetch\SafeFetchManager;
+use RoundlyConsulting\Webhooks\DataTransferObjects\JudgedUrl;
 use RoundlyConsulting\Webhooks\Exceptions\DestinationBlockedException;
 use RoundlyConsulting\Webhooks\Exceptions\InvalidEndpointException;
 use SensitiveParameter;
@@ -26,11 +27,9 @@ final readonly class OutboundUrls
     ) {}
 
     /**
-     * @return array{url: string, host: string}
-     *
      * @throws DestinationBlockedException|InvalidEndpointException
      */
-    public function judge(#[SensitiveParameter] string $url): array
+    public function judge(#[SensitiveParameter] string $url): JudgedUrl
     {
         if (strlen($url) > 2048) {
             throw InvalidEndpointException::url();
@@ -46,7 +45,7 @@ final readonly class OutboundUrls
             if (WebhooksConfig::verifyOnSave()) {
                 $vetted = $this->safeFetch->vet($url, $policy);
 
-                return ['url' => $vetted->url, 'host' => $vetted->host];
+                return new JudgedUrl($vetted->url, $vetted->host);
             }
 
             $canonical = $this->safeFetch->precheck($url, $policy);
@@ -54,15 +53,13 @@ final readonly class OutboundUrls
             throw DestinationBlockedException::from($exception);
         }
 
-        return ['url' => $canonical->toString(), 'host' => $canonical->host];
+        return new JudgedUrl($canonical->toString(), $canonical->host);
     }
 
     /**
      * With the SSRF guard off: the canonical shape and the scheme only.
-     *
-     * @return array{url: string, host: string}
      */
-    private function shapeOnly(string $url): array
+    private function shapeOnly(string $url): JudgedUrl
     {
         try {
             $canonical = $this->safeFetch->urls()->canonicalise($url);
@@ -74,7 +71,7 @@ final readonly class OutboundUrls
             throw InvalidEndpointException::url();
         }
 
-        return ['url' => $canonical->toString(), 'host' => $canonical->host];
+        return new JudgedUrl($canonical->toString(), $canonical->host);
     }
 
     private static function schemeAllowed(CanonicalUrl $url): bool
