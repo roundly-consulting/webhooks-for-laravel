@@ -98,6 +98,8 @@ it('doctor checks the queue, the store and the tables', function (): void {
 
     config()->set('queue.connections.database.retry_after', 90);
     config()->set('http-client-rate-limits.store', 'cache');
+    config()->set('cache.stores.shared', ['driver' => 'redis']);
+    config()->set('webhooks.inbound.rate_limit.cache_store', 'shared');
     $this->artisan('webhooks:doctor')->expectsOutputToContain('No problems found')->assertSuccessful();
 
     config()->set('webhooks.schemes', ['bad' => stdClass::class]);

@@ -43,7 +43,10 @@ Initial public release.
 - **Events** — `WebhookReceived`, `WebhookRejected`, `WebhookProcessingFailed`,
   `DeliverySucceeded`, `DeliveryFailed`, `EndpointDisabled`, `EndpointSecretRotated`.
 - **Commands** — `webhooks:install`, `webhooks:doctor`, `webhooks:retry`, `webhooks:prune`,
-  `webhooks:rotate-secret`, `webhooks:redeliver`, `webhooks:replay`.
+  `webhooks:rotate-secret`, `webhooks:redeliver`, `webhooks:replay`. The doctor (`--json` for
+  monitoring) also flags a stalled sweep, the schedule switched off, volatile (array) limiter and
+  idempotency stores, a queue `retry_after` shorter than the handler timeout, and an SQS
+  `max_delay` over 900 seconds.
 - **Testing** — `Webhooks::fake()` recording sends, broadcasts, redeliveries, replays, rotations and
   disables, each with an assertion and a negative (`assertNothingBroadcast()`,
   `assertSecretNotRotated()`, …); `assertSent('invoice.paid', payload: …)` without the endpoint;

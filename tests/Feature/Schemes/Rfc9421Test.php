@@ -136,6 +136,8 @@ it('fails an RFC 9421 delivery with no key to sign with', function (): void {
 it('doctor finds the key bound to an RFC 9421 endpoint', function (): void {
     config()->set('queue.default', 'database');
     config()->set('http-client-rate-limits.store', 'cache');
+    config()->set('cache.stores.shared', ['driver' => 'redis']);
+    config()->set('webhooks.inbound.rate_limit.cache_store', 'shared');
     config()->set('sentinel.signatures.profiles.default.components', ['@method', '@authority', '@path', 'webhook-id']);
     rfc9421Endpoint();
 
