@@ -14,6 +14,7 @@ use RoundlyConsulting\Sentinel\Exceptions\IdempotencyKeyReusedException;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotencyRequestInProgressException;
 use RoundlyConsulting\Sentinel\Exceptions\IdempotentResponseUnavailableException;
 use RoundlyConsulting\Sentinel\SentinelManager;
+use RoundlyConsulting\Webhooks\Accessors\SchemeRegistry;
 use RoundlyConsulting\Webhooks\DataTransferObjects\AcceptedDelivery;
 use RoundlyConsulting\Webhooks\DataTransferObjects\VerifiedWebhook;
 use RoundlyConsulting\Webhooks\Enums\DuplicateResponse;
@@ -56,6 +57,7 @@ final readonly class ReceiveWebhookAction
         private InboundLimiter $limiter,
         private SentinelManager $sentinel,
         private Dispatcher $events,
+        private SchemeRegistry $schemes,
     ) {}
 
     public function execute(string $key, Request $request): Response
@@ -203,7 +205,6 @@ final readonly class ReceiveWebhookAction
      */
     private function guarded(InboundEndpoint $endpoint, VerifiedWebhook $verified, Closure $run, string $digest, string $scope, int $ttl): AcceptedDelivery
     {
-
         // Signed only when the scheme supplied the id: an id-less verdict falls back to the
         // unsigned `Idempotency-Key`, whatever the scheme claims.
         if ($verified->replayProtected || ($verified->idIsSigned && $verified->deliveryId !== null && $verified->deliveryId !== '')) {
@@ -212,9 +213,19 @@ final readonly class ReceiveWebhookAction
 
         // No signed timestamp either: nothing bounds a replay in time, so the stored deliveries'
         // digests keep guarding after the idempotency store forgot the body.
-        $guarded = $verified->timestamp === null
-            ? fn (): array => self::storedTwin($endpoint, $digest)?->toStored() ?? $run()
-            : $run;
+        if ($verified->timestamp === null) {
+            $guarded = fn (): array => self::storedTwin($endpoint, $digest)?->toStored() ?? $run();
+        } else {
+            $guarded = $run;
+
+            // A timestamp checked against the tolerance refuses the captured request once it is
+            // past it: a longer guard would only merge genuine deliveries that share a body. An
+            // RFC 9421 `created` is bounded by the sentinel profile's max_age instead, so it keeps
+            // the full TTL.
+            if (! $this->schemes->resolve($endpoint->signature_scheme) instanceof Rfc9421Scheme) {
+                $ttl = max(60, 2 * ($endpoint->tolerance_seconds ?? WebhooksConfig::tolerance()));
+            }
+        }
 
         return self::outcome($this->sentinel->idempotency()->run('body:'.$digest, $scope.':body', $guarded, $digest, $ttl));
     }

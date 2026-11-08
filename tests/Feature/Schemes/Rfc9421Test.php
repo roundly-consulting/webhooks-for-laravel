@@ -2,11 +2,13 @@
 
 declare(strict_types=1);
 
+use GuzzleHttp\Psr7\Request as PsrRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Testing\TestResponse;
 use RoundlyConsulting\Sentinel\DataTransferObjects\DeferredSignature;
+use RoundlyConsulting\Sentinel\DataTransferObjects\SigningOptions;
 use RoundlyConsulting\Sentinel\DataTransferObjects\VerifiedSignature;
 use RoundlyConsulting\Sentinel\Enums\Algorithm;
 use RoundlyConsulting\Sentinel\Enums\Algorithm as SentinelAlgorithm;
@@ -361,4 +363,33 @@ it('a copy that loses the nonce commit stores nothing and is answered as a repla
 
     expect(InboundDelivery::query()->count())->toBe(0);
     $fake->assertNonceCommitted('partner');
+});
+
+it('keeps the full body guard for an rfc9421 delivery without a nonce', function (): void {
+    config()->set('sentinel.signatures.profiles.default.require_nonce', false);
+    config()->set('sentinel.signatures.profiles.default.max_age', 3600);
+    $endpoint = rfc9421Endpoint(options: ['id_header' => 'x-none']);
+    $body = '{"type":"order.paid"}';
+    $signed = Sentinel::signatures()->sign(
+        new PsrRequest('POST', $endpoint->url(), ['Content-Type' => 'application/json'], $body),
+        'partner',
+        new SigningOptions(components: ['@method', '@authority', '@path', 'content-digest', 'content-type'], nonce: false),
+    );
+    $post = function (string $key) use ($signed, $body) {
+        $server = ['CONTENT_TYPE' => 'application/json', 'HTTP_IDEMPOTENCY_KEY' => $key];
+
+        foreach (['Signature', 'Signature-Input', 'Content-Digest'] as $name) {
+            $server['HTTP_'.strtoupper(str_replace('-', '_', $name))] = $signed->getHeaderLine($name);
+        }
+
+        return $this->call('POST', (string) $signed->getUri(), [], [], [], $server, $body);
+    };
+
+    $post('k-1')->assertStatus(202);
+    // Past twice the tolerance, yet inside the profile's max_age: the captured request still
+    // verifies, so the body guard must still hold.
+    $this->travel(700)->seconds();
+    $post('k-2')->assertStatus(200)->assertJson(['status' => 'duplicate']);
+
+    expect(InboundDelivery::query()->count())->toBe(1);
 });

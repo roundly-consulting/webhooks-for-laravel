@@ -6,6 +6,14 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 
 ## Unreleased
 
+### Fixed
+
+- An inbound body guard on a scheme with a signed timestamp (a Stripe-style recipe whose body has no
+  id, or any scheme whose id is unsigned) now lasts twice the endpoint's tolerance (at least 60
+  seconds) instead of `inbound.dedupe_ttl`, so two genuine deliveries with the same body minutes
+  apart are no longer merged into one; past the tolerance the timestamp itself refuses the replay.
+  RFC 9421 and timestamp-less schemes keep the full guard.
+
 ## 1.0.0 - 2026-11-08
 
 Initial public release.

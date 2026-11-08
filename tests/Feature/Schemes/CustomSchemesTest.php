@@ -10,6 +10,7 @@ use Illuminate\Support\ServiceProvider;
 use RoundlyConsulting\Webhooks\Accessors\HandlerRegistry;
 use RoundlyConsulting\Webhooks\Accessors\SchemeRegistry;
 use RoundlyConsulting\Webhooks\Contracts\SignatureScheme;
+use RoundlyConsulting\Webhooks\DataTransferObjects\InboundEndpointOptions;
 use RoundlyConsulting\Webhooks\DataTransferObjects\IncomingWebhook;
 use RoundlyConsulting\Webhooks\DataTransferObjects\VerifiedWebhook;
 use RoundlyConsulting\Webhooks\Enums\InboundStatus;
@@ -247,6 +248,44 @@ it('a_timestampless_scheme_refuses_a_captured_body_after_the_dedupe_ttl', functi
 
     expect(InboundDelivery::query()->count())->toBe(1);
 });
+
+it('keeps the body guard of a signed-timestamp delivery only twice the tolerance', function (?int $tolerance, int $window): void {
+    $secret = 'whsec_StripeStyleSecretUsedAsRawBytes';
+    $endpoint = Webhooks::inbound()->create(scheme: 'stripe', secret: $secret, options: new InboundEndpointOptions(toleranceSeconds: $tolerance))->endpoint;
+    $body = '{"type":"invoice.paid"}';   // no id in the body: the id is the unsigned Idempotency-Key
+    $post = function (string $key, ?int $t = null) use ($endpoint, $body, $secret) {
+        $t = (string) ($t ?? CarbonImmutable::now()->getTimestamp());
+
+        return $this->call('POST', $endpoint->url(), [], [], [], [
+            'CONTENT_TYPE' => 'application/json',
+            'HTTP_STRIPE_SIGNATURE' => "t={$t},v1=".hash_hmac('sha256', $t.'.'.$body, $secret),
+            'HTTP_IDEMPOTENCY_KEY' => $key,
+        ], $body);
+    };
+    $start = CarbonImmutable::now();
+    $first = $start->getTimestamp();
+    $at = fn (int $seconds) => $this->travelTo($start->addSeconds($seconds));
+
+    $post('k-1')->assertStatus(202);
+    // Inside the tolerance the captured request under a fresh key is a duplicate.
+    $at(min($tolerance ?? 300, $window) - 5);
+    $post('k-2', $first)->assertStatus(200)->assertJson(['status' => 'duplicate']);
+    // The guard holds until the window ends, for a fresh timestamp too.
+    $at($window - 5);
+    $post('k-3')->assertStatus(200)->assertJson(['status' => 'duplicate']);
+
+    // Past it the signed timestamp refuses the replay, so the guard has nothing left to block:
+    // a genuine second delivery with the same body is stored.
+    $at($window + 5);
+    $post('k-4', $first)->assertStatus(401)->assertJson(['code' => 'stale_timestamp']);
+    $post('k-5')->assertStatus(202);
+
+    expect(InboundDelivery::query()->pluck('idempotency_key')->sort()->values()->all())->toBe(['k-1', 'k-5']);
+})->with([
+    'config tolerance (300 s)' => [null, 600],
+    'endpoint tolerance' => [100, 200],
+    'a floor of 60 s' => [10, 60],
+]);
 
 it('a_same_body_duplicate_under_a_fresh_id_queues_the_stalled_original', function (): void {
     $secret = 'gh-shared-secret';
