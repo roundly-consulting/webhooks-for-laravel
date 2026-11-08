@@ -13,6 +13,8 @@ use RoundlyConsulting\Webhooks\Models\OutboundDelivery;
 use RoundlyConsulting\Webhooks\Models\OutboundEndpoint;
 use RoundlyConsulting\Webhooks\Testing\SignedWebhookRequest;
 use RoundlyConsulting\Webhooks\Tests\Fixtures\App\Models\Team;
+use RoundlyConsulting\Webhooks\Tests\Install\InstallTestCase;
+use RoundlyConsulting\Webhooks\Tests\Support\RouteOffTestCase;
 use RoundlyConsulting\Webhooks\Tests\Support\SwappedModelsTestCase;
 use RoundlyConsulting\Webhooks\Tests\Support\UlidKeyTestCase;
 use RoundlyConsulting\Webhooks\Tests\Support\UuidKeyTestCase;
@@ -20,6 +22,8 @@ use RoundlyConsulting\Webhooks\Tests\TestCase;
 
 uses(TestCase::class)->in('Arch', 'Feature', 'Acceptance', 'Network');
 uses(SwappedModelsTestCase::class)->in('ModelSwap');
+uses(InstallTestCase::class)->in('Install');
+uses(RouteOffTestCase::class)->in('RouteOff');
 uses(UlidKeyTestCase::class)->in('KeyTypes/UlidKeyTest.php');
 uses(UuidKeyTestCase::class)->in('KeyTypes/UuidKeyTest.php');
 

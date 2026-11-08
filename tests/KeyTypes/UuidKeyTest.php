@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Database\Eloquent\Concerns\HasUniqueStringIds;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
@@ -11,6 +12,7 @@ use RoundlyConsulting\Webhooks\Enums\OutboundStatus;
 use RoundlyConsulting\Webhooks\Exceptions\InvalidWebhooksConfigurationException;
 use RoundlyConsulting\Webhooks\Facades\Webhooks;
 use RoundlyConsulting\Webhooks\Models\InboundDelivery;
+use RoundlyConsulting\Webhooks\Models\InboundEndpoint;
 
 /**
  * A uuid-keyed host: the package's own ids and the owner morph are uuids.
@@ -59,4 +61,11 @@ it('a_mismatched_owner_key_type_fails_fast_naming_the_config_key', function (): 
 
     expect(fn () => Webhooks::for($team)->inbound()->create())
         ->toThrow(InvalidWebhooksConfigurationException::class, 'webhooks.key_type');
+});
+
+it('route-binds only a valid key', function (): void {
+    $endpoint = inboundEndpoint();
+
+    expect((new InboundEndpoint)->resolveRouteBinding($endpoint->getKey())?->is($endpoint))->toBeTrue()
+        ->and(fn () => (new InboundEndpoint)->resolveRouteBinding('not-a-key'))->toThrow(ModelNotFoundException::class);
 });
