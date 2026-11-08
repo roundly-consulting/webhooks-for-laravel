@@ -7,7 +7,9 @@ namespace RoundlyConsulting\Webhooks\Accessors;
 use Closure;
 use Illuminate\Contracts\Container\Container;
 use RoundlyConsulting\Webhooks\Contracts\SignatureScheme;
+use RoundlyConsulting\Webhooks\Enums\SecretEncoding;
 use RoundlyConsulting\Webhooks\Exceptions\UnknownSchemeException;
+use RoundlyConsulting\Webhooks\Schemes\DefaultScheme;
 use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
 
 /**
@@ -64,6 +66,22 @@ final class SchemeRegistry
     public function has(string $name): bool
     {
         return isset($this->extensions[$name]) || isset(WebhooksConfig::schemes()[$name]);
+    }
+
+    /**
+     * How a scheme reads an imported secret, as far as the package knows: Standard Webhooks for
+     * the default scheme, the string's own bytes for anything else (a custom scheme picks its
+     * encoding per call).
+     *
+     * @internal
+     */
+    public function secretEncoding(string $name): SecretEncoding
+    {
+        try {
+            return $this->resolve($name) instanceof DefaultScheme ? SecretEncoding::StandardWebhooks : SecretEncoding::Raw;
+        } catch (UnknownSchemeException) {
+            return SecretEncoding::Raw;
+        }
     }
 
     /**

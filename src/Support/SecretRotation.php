@@ -7,6 +7,7 @@ namespace RoundlyConsulting\Webhooks\Support;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Model;
 use RoundlyConsulting\Webhooks\DataTransferObjects\RotatedSecret;
+use RoundlyConsulting\Webhooks\Enums\SecretEncoding;
 use RoundlyConsulting\Webhooks\Exceptions\SecretRotationException;
 use SensitiveParameter;
 
@@ -22,7 +23,7 @@ final class SecretRotation
     /**
      * @throws SecretRotationException
      */
-    public static function rotate(Model $endpoint, ?CarbonInterface $grace = null, #[SensitiveParameter] ?string $secret = null): RotatedSecret
+    public static function rotate(Model $endpoint, ?CarbonInterface $grace = null, #[SensitiveParameter] ?string $secret = null, SecretEncoding $encoding = SecretEncoding::Raw): RotatedSecret
     {
         $now = Clock::now();
         $graceEndsAt = $grace === null ? $now->addSeconds(WebhooksConfig::graceSeconds()) : Clock::utc($grace);
@@ -35,7 +36,7 @@ final class SecretRotation
             throw SecretRotationException::graceTooLong(WebhooksConfig::maxGraceSeconds());
         }
 
-        $new = $secret === null ? Secrets::generate() : Secrets::imported($secret);
+        $new = $secret === null ? Secrets::generate() : Secrets::imported($secret, $encoding);
 
         $endpoint->getConnection()->transaction(static function () use ($endpoint, $new, $graceEndsAt, $now): void {
             $locked = $endpoint->newQuery()->whereKey($endpoint->getKey())->lockForUpdate()->firstOrFail();

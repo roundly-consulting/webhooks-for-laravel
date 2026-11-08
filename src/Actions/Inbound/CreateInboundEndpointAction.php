@@ -57,7 +57,7 @@ final readonly class CreateInboundEndpointAction
             throw InvalidEndpointException::option('name');
         }
 
-        $secret = $secret === null ? Secrets::generate() : Secrets::imported($secret);
+        $secret = $secret === null ? Secrets::generate() : Secrets::imported($secret, $this->schemes->secretEncoding($scheme));
         $class = ModelSeams::inboundEndpoint();
 
         $endpoint = new $class;

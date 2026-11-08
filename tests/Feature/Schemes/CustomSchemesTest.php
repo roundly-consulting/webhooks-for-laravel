@@ -267,3 +267,15 @@ it('a_same_body_duplicate_under_a_fresh_id_queues_the_stalled_original', functio
     Queue::assertPushed(ProcessInboundDelivery::class, 2);
     expect($original->refresh()->status)->toBe(InboundStatus::Queued);
 });
+
+it('refuses_a_whsec_secret_the_default_scheme_cannot_decode', function (): void {
+    // Standard Webhooks reads the bytes behind `whsec_`: this one would verify nothing, ever.
+    expect(fn () => Webhooks::inbound()->create(secret: 'whsec_!!!not-base64!!!'))->toThrow(InvalidEndpointException::class)
+        ->and(fn () => Webhooks::inbound()->rotateSecret(inboundEndpoint(), secret: 'whsec_'))->toThrow(InvalidEndpointException::class);
+
+    // A scheme that uses the string raw (Stripe's `whsec_…`) and the default scheme's valid
+    // secrets are imported as before.
+    expect(Webhooks::inbound()->create(scheme: 'stripe', secret: 'whsec_StripeStyleSecretUsedAsRawBytes')->secret)->toBe('whsec_StripeStyleSecretUsedAsRawBytes')
+        ->and(Webhooks::inbound()->create(secret: V2_SECRET)->secret)->toBe(V2_SECRET)
+        ->and(Webhooks::inbound()->create(secret: 'plain-shared-secret')->secret)->toBe('plain-shared-secret');
+});

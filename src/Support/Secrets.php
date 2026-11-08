@@ -29,13 +29,19 @@ final class Secrets
     }
 
     /**
-     * An imported secret, stored verbatim: 1–1 024 bytes, no control characters.
+     * An imported secret, stored verbatim: 1–1 024 bytes, no control characters — and, for a
+     * scheme that reads it as a Standard Webhooks secret, one that yields key bytes (a `whsec_`
+     * secret that is not base64 would verify nothing, ever).
      *
      * @throws InvalidEndpointException
      */
-    public static function imported(#[SensitiveParameter] string $secret): string
+    public static function imported(#[SensitiveParameter] string $secret, SecretEncoding $encoding = SecretEncoding::Raw): string
     {
         if ($secret === '' || strlen($secret) > self::MAX_IMPORTED_BYTES || preg_match('/[\x00-\x1f\x7f]/', $secret) === 1) {
+            throw InvalidEndpointException::secret();
+        }
+
+        if (self::keyBytes($secret, $encoding) === null) {
             throw InvalidEndpointException::secret();
         }
 
