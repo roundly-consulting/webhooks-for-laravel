@@ -7,6 +7,7 @@ use Illuminate\Container\Container;
 use Illuminate\Support\Facades\Facade;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
+use RoundlyConsulting\PackageToolkit\Exceptions\InvalidConfigurationException;
 use RoundlyConsulting\Webhooks\Accessors\HandlerRegistry;
 use RoundlyConsulting\Webhooks\Accessors\SchemeRegistry;
 use RoundlyConsulting\Webhooks\Contracts\SignatureScheme;
@@ -29,6 +30,7 @@ use RoundlyConsulting\Webhooks\Schemes\EndpointSecrets;
 use RoundlyConsulting\Webhooks\Schemes\Rfc9421Scheme;
 use RoundlyConsulting\Webhooks\Support\MacEngine;
 use RoundlyConsulting\Webhooks\Support\Secrets;
+use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
 use RoundlyConsulting\Webhooks\Tests\Fixtures\App\Handlers\BillingWebhookHandler;
 use RoundlyConsulting\Webhooks\Tests\Fixtures\App\Schemes\GitHubScheme;
 use RoundlyConsulting\Webhooks\Tests\Fixtures\App\Schemes\StripeScheme;
@@ -99,6 +101,22 @@ it('refuses an imported secret it cannot store', function (string $secret): void
     Webhooks::inbound()->create(secret: $secret);
 })->with(['empty' => '', 'control' => "a\nb", 'too long' => str_repeat('s', 1025)])
     ->throws(InvalidEndpointException::class);
+
+it('caps scheme names at the 64 characters an endpoint can store, at every entry point', function (): void {
+    $longest = str_repeat('s', 64);
+    $tooLong = str_repeat('s', 65);
+
+    config()->set('webhooks.schemes', ['default' => DefaultScheme::class, $longest => DefaultScheme::class]);
+    expect(Webhooks::inbound()->create(scheme: $longest)->endpoint->refresh()->signature_scheme)->toBe($longest);
+
+    config()->set('webhooks.schemes', ['default' => DefaultScheme::class, $tooLong => DefaultScheme::class]);
+    expect(fn () => WebhooksConfig::schemes())->toThrow(InvalidConfigurationException::class)
+        ->and(fn () => Webhooks::schemes()->extend($tooLong, DefaultScheme::class))->toThrow(UnknownSchemeException::class)
+        ->and(fn () => Webhooks::schemes()->extend("trailing\n", DefaultScheme::class))->toThrow(UnknownSchemeException::class);
+
+    config()->set('webhooks.schemes', ['default' => DefaultScheme::class, "trailing\n" => DefaultScheme::class]);
+    expect(fn () => WebhooksConfig::schemes())->toThrow(InvalidConfigurationException::class);
+});
 
 it('registering_a_non_scheme_class_throws', function (): void {
     expect(fn () => Webhooks::schemes()->extend('bad', stdClass::class))->toThrow(UnknownSchemeException::class)

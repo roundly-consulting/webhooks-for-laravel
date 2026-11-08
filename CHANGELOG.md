@@ -47,6 +47,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   {prefix}/{key}` with a real 32-character key, on `inbound.route.domain` when one is set. Before,
   an empty `inbound.route.prefix` switched them off for every POST of the host app, and any POST
   under the prefix (on any domain) lost them too. `Route::webhooks()` matches the same way.
+- A scheme name in `webhooks.schemes` is now capped at 64 characters, like
+  `Webhooks::schemes()->extend()` and the `signature_scheme` column: a 65–100-character name used to
+  pass the config check and then fail to store on an endpoint. Scheme and handler names in the
+  config with a trailing newline are refused too.
 
 ## 1.0.0 - 2026-11-08
 

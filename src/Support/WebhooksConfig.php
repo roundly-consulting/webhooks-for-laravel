@@ -465,7 +465,8 @@ final class WebhooksConfig
         $schemes = [];
 
         foreach ($configured as $name => $class) {
-            $schemes[self::name('webhooks.schemes', $name)] = self::implementation('webhooks.schemes', $class, SignatureScheme::class);
+            // `signature_scheme` is a string(64) column, the same cap `extend()` applies.
+            $schemes[self::name('webhooks.schemes', $name, 64)] = self::implementation('webhooks.schemes', $class, SignatureScheme::class);
         }
 
         return $schemes;
@@ -618,9 +619,12 @@ final class WebhooksConfig
         return $value;
     }
 
-    private static function name(string $key, mixed $name): string
+    /**
+     * A registry name — at most `$max` characters, the width of the column that stores it.
+     */
+    private static function name(string $key, mixed $name, int $max = 100): string
     {
-        if (! is_string($name) || preg_match('/^[a-z0-9][a-z0-9_.-]{0,99}$/', $name) !== 1) {
+        if (! is_string($name) || preg_match('/^[a-z0-9][a-z0-9_.-]{0,'.($max - 1).'}$/D', $name) !== 1) {
             throw InvalidConfigurationException::notAString($key, $name);
         }
 
