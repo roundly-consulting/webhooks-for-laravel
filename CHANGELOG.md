@@ -34,6 +34,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 - `webhooks:doctor` runs its RFC 9421 checks (`rfc9421_no_key`, `rfc9421_id_unsigned`,
   `rfc9421_profile_weak`, `rfc9421_nonce_store`) on every endpoint whose scheme name maps to
   `Rfc9421Scheme`, not only on one named `rfc9421`.
+- `webhooks:rotate-secret`, `webhooks:replay` and `webhooks:redeliver` print the translated error
+  and exit with failure for an unknown endpoint, a grace that is too long, a delivery still in
+  progress, a pruned body or a disabled endpoint, instead of crashing with an exception trace.
 
 ## 1.0.0 - 2026-11-08
 

@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace RoundlyConsulting\Webhooks\Commands;
 
 use Illuminate\Console\Command;
+use RoundlyConsulting\Webhooks\Exceptions\EndpointNotFoundException;
+use RoundlyConsulting\Webhooks\Exceptions\SecretRotationException;
 use RoundlyConsulting\Webhooks\Support\Clock;
 use RoundlyConsulting\Webhooks\WebhooksManager;
 
@@ -30,9 +32,20 @@ final class RotateSecretCommand extends Command
         }
 
         $until = $grace === null ? null : Clock::now()->addSeconds((int) $grace);
-        $rotated = $direction === 'inbound'
-            ? $webhooks->inbound()->rotateSecret($webhooks->inbound()->find($id), $until)
-            : $webhooks->outbound()->rotateSecret($webhooks->outbound()->find($id), $until);
+
+        try {
+            $rotated = $direction === 'inbound'
+                ? $webhooks->inbound()->rotateSecret($webhooks->inbound()->find($id), $until)
+                : $webhooks->outbound()->rotateSecret($webhooks->outbound()->find($id), $until);
+        } catch (EndpointNotFoundException) {
+            $this->components->error((string) trans('webhooks::commands.endpoint_not_found'));
+
+            return self::FAILURE;
+        } catch (SecretRotationException $exception) {
+            $this->components->error($exception->getMessage());
+
+            return self::FAILURE;
+        }
 
         $this->components->info((string) trans('webhooks::commands.rotated', ['until' => $rotated->graceEndsAt->toIso8601ZuluString()]));
         $this->line($rotated->secret);

@@ -7,12 +7,18 @@ use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
+use RoundlyConsulting\Webhooks\Enums\InboundStatus;
 use RoundlyConsulting\Webhooks\Enums\OutboundStatus;
+use RoundlyConsulting\Webhooks\Exceptions\DeliveryInProgressException;
+use RoundlyConsulting\Webhooks\Exceptions\EndpointNotAcceptingException;
+use RoundlyConsulting\Webhooks\Exceptions\PayloadPrunedException;
+use RoundlyConsulting\Webhooks\Exceptions\SecretRotationException;
 use RoundlyConsulting\Webhooks\Facades\Webhooks;
 use RoundlyConsulting\Webhooks\Jobs\DeliverWebhook;
 use RoundlyConsulting\Webhooks\Jobs\ProcessInboundDelivery;
 use RoundlyConsulting\Webhooks\Models\InboundDelivery;
 use RoundlyConsulting\Webhooks\Models\OutboundDelivery;
+use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
 
 beforeEach(function (): void {
     Queue::fake();
@@ -49,6 +55,26 @@ it('redelivers and replays by public id', function (): void {
     $this->artisan('webhooks:replay', ['delivery' => $inbound->public_id])->assertSuccessful();
     Queue::assertPushed(ProcessInboundDelivery::class);
     $this->artisan('webhooks:replay', ['delivery' => 'nope'])->assertFailed();
+});
+
+it('fails with the translated error instead of throwing', function (): void {
+    $sending = OutboundDelivery::factory()->status(OutboundStatus::Sending)->create(['endpoint_id' => outboundEndpoint()->getKey()]);
+    $disabled = outboundEndpoint(attributes: ['enabled' => false]);
+    $processing = InboundDelivery::factory()->create(['status' => InboundStatus::Processing, 'processing_started_at' => now()]);
+    $pruned = InboundDelivery::factory()->create(['payload' => null, 'payload_pruned_at' => now()]);
+
+    $this->artisan('webhooks:rotate-secret', ['direction' => 'inbound', 'endpoint' => '999'])
+        ->expectsOutputToContain(__('webhooks::commands.endpoint_not_found'))->assertFailed();
+    $this->artisan('webhooks:rotate-secret', ['direction' => 'inbound', 'endpoint' => (string) inboundEndpoint()->getKey(), '--grace' => '99999999'])
+        ->expectsOutputToContain(SecretRotationException::graceTooLong(WebhooksConfig::maxGraceSeconds())->getMessage())->assertFailed();
+    $this->artisan('webhooks:replay', ['delivery' => $processing->public_id])
+        ->expectsOutputToContain(DeliveryInProgressException::make()->getMessage())->assertFailed();
+    $this->artisan('webhooks:replay', ['delivery' => $pruned->public_id])
+        ->expectsOutputToContain(PayloadPrunedException::make()->getMessage())->assertFailed();
+    $this->artisan('webhooks:redeliver', ['delivery' => $sending->webhookId()])
+        ->expectsOutputToContain(DeliveryInProgressException::make()->getMessage())->assertFailed();
+    $this->artisan('webhooks:redeliver', ['--endpoint' => (string) $disabled->getKey()])
+        ->expectsOutputToContain(EndpointNotAcceptingException::disabled()->getMessage())->assertFailed();
 });
 
 it('runs the sweep', function (): void {

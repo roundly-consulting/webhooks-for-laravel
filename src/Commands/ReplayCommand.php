@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace RoundlyConsulting\Webhooks\Commands;
 
 use Illuminate\Console\Command;
+use RoundlyConsulting\Webhooks\Exceptions\DeliveryInProgressException;
+use RoundlyConsulting\Webhooks\Exceptions\PayloadPrunedException;
 use RoundlyConsulting\Webhooks\WebhooksManager;
 
 /**
@@ -27,7 +29,14 @@ final class ReplayCommand extends Command
             return self::FAILURE;
         }
 
-        $webhooks->inbound()->replay($delivery);
+        try {
+            $webhooks->inbound()->replay($delivery);
+        } catch (DeliveryInProgressException|PayloadPrunedException $exception) {
+            $this->components->error($exception->getMessage());
+
+            return self::FAILURE;
+        }
+
         $this->components->info((string) trans('webhooks::commands.replayed'));
 
         return self::SUCCESS;

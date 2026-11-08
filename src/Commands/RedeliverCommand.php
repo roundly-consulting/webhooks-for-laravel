@@ -6,7 +6,10 @@ namespace RoundlyConsulting\Webhooks\Commands;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
+use RoundlyConsulting\Webhooks\Exceptions\DeliveryInProgressException;
+use RoundlyConsulting\Webhooks\Exceptions\EndpointNotAcceptingException;
 use RoundlyConsulting\Webhooks\Exceptions\EndpointNotFoundException;
+use RoundlyConsulting\Webhooks\Exceptions\PayloadPrunedException;
 use RoundlyConsulting\Webhooks\Models\OutboundDelivery;
 use RoundlyConsulting\Webhooks\WebhooksManager;
 use Throwable;
@@ -50,7 +53,14 @@ final class RedeliverCommand extends Command
             return self::FAILURE;
         }
 
-        $webhooks->outbound()->redeliver($delivery);
+        try {
+            $webhooks->outbound()->redeliver($delivery);
+        } catch (DeliveryInProgressException|PayloadPrunedException|EndpointNotAcceptingException $exception) {
+            $this->components->error($exception->getMessage());
+
+            return self::FAILURE;
+        }
+
         $this->components->info((string) trans('webhooks::commands.redelivered'));
 
         return self::SUCCESS;
@@ -76,7 +86,14 @@ final class RedeliverCommand extends Command
             return self::FAILURE;
         }
 
-        $result = $webhooks->outbound()->redeliverFailed($endpoint, $since, (bool) $this->option('cancelled'));
+        try {
+            $result = $webhooks->outbound()->redeliverFailed($endpoint, $since, (bool) $this->option('cancelled'));
+        } catch (EndpointNotAcceptingException $exception) {
+            $this->components->error($exception->getMessage());
+
+            return self::FAILURE;
+        }
+
         $this->components->info((string) trans('webhooks::commands.redelivered_bulk', ['queued' => $result->queued, 'skipped' => $result->skippedPruned]));
 
         return self::SUCCESS;
