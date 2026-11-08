@@ -49,6 +49,15 @@ jobs:
       - name: List Installed Dependencies
         run: composer show -D
 
+      # tests/Docs/ReceiverSnippetsTest runs the receiver guide's snippets with the runner image's
+      # Node, Python, Go and Ruby (3.0+ for OpenSSL.secure_compare); on CI a missing one fails.
+      - name: Receiver runtimes
+        run: |
+          node --version
+          python3 --version
+          go version
+          ruby -ropenssl -e 'abort("Ruby 3.0+ needed") unless OpenSSL.respond_to?(:secure_compare); puts "ruby #{RUBY_VERSION}"'
+
       - name: Execute tests
         run: vendor/bin/pest --coverage --min=95 --coverage-clover=build/clover.xml
 
