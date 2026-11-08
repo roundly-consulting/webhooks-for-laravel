@@ -133,7 +133,26 @@ final readonly class AttemptDeliveryAction
             $outcome = self::failure(AttemptError::Unexpected, class_basename($exception), false, $clock);
         }
 
+        // An attempt that outlived its claim may have been recorded `worker_lost` and dispatched
+        // again by the sweep meanwhile: then it is no longer this job's to record.
+        if (! $this->stillOwned($delivery, $token)) {
+            return;
+        }
+
         $this->record($delivery, $endpoint, $started, $outcome);
+    }
+
+    /**
+     * Re-take the claim for the moment of recording — only while this job's token still holds
+     * the row in `sending`.
+     */
+    private function stillOwned(OutboundDelivery $delivery, string $token): bool
+    {
+        return ModelSeams::outboundDelivery()::query()
+            ->whereKey($delivery->getKey())
+            ->where('dispatch_token', $token)
+            ->where('status', OutboundStatus::Sending->value)
+            ->update(['claimed_until' => Clock::format(Clock::now()->addSeconds(self::CLAIM_SLACK))]) === 1;
     }
 
     /**

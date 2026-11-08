@@ -648,3 +648,23 @@ it('records an unexpected exception as a retried attempt and never strands the r
     Event::assertDispatched(DeliveryFailed::class, fn (DeliveryFailed $event): bool => $event->final);
     Http::assertNothingSent();
 });
+
+it('an_attempt_that_outlived_its_claim_records_nothing_over_the_sweep', function (): void {
+    $endpoint = outboundEndpoint();
+    $delivery = Webhooks::send($endpoint, 'invoice.paid', ['invoice' => 1]);
+    Http::fake(function () {
+        // The request hangs past the claim: the sweep calls the worker lost and dispatches again.
+        CarbonImmutable::setTestNow(CarbonImmutable::now()->addMinutes(2));
+        Webhooks::outbound()->dispatchDue();
+
+        return Http::response('ok');
+    });
+
+    $delivery = attempt($delivery);
+
+    // The late answer must not insert a second attempt #1 or overwrite the sweep's state.
+    expect(OutboundAttempt::query()->pluck('error_code')->all())->toBe([AttemptError::WorkerLost])
+        ->and($delivery->status)->toBe(OutboundStatus::Retrying)
+        ->and($delivery->attempts)->toBe(1)
+        ->and($delivery->dispatch_token)->not->toBeNull();
+});
