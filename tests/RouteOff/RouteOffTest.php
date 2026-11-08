@@ -39,8 +39,12 @@ it('route_macro_skips_body_decoding_middleware_for_its_prefix', function (): voi
         return app($middleware)->handle($request, static fn (Request $request): mixed => $request->json()->all());
     };
 
-    expect($run('/hooks/abc', TrimStrings::class))->toBe(['name' => '  padded  ', 'empty' => ''])
-        ->and($run('/hooks/abc', ConvertEmptyStringsToNull::class))->toBe(['name' => '  padded  ', 'empty' => ''])
+    $key = '/hooks/'.str_repeat('a', 32);
+
+    expect($run($key, TrimStrings::class))->toBe(['name' => '  padded  ', 'empty' => ''])
+        ->and($run($key, ConvertEmptyStringsToNull::class))->toBe(['name' => '  padded  ', 'empty' => ''])
+        // Only a real key: a host's own route under the prefix keeps the middleware.
+        ->and($run('/hooks/abc', TrimStrings::class))->toBe(['name' => 'padded', 'empty' => ''])
         ->and($run('/elsewhere/abc', TrimStrings::class))->toBe(['name' => 'padded', 'empty' => ''])
         ->and($run('/elsewhere/abc', ConvertEmptyStringsToNull::class))->toBe(['name' => '  padded  ', 'empty' => null]);
 });

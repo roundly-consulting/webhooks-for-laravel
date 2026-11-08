@@ -37,6 +37,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 - `webhooks:rotate-secret`, `webhooks:replay` and `webhooks:redeliver` print the translated error
   and exit with failure for an unknown endpoint, a grace that is too long, a delivery still in
   progress, a pruned body or a disabled endpoint, instead of crashing with an exception trace.
+- The inbound route now skips Laravel's `TrimStrings` / `ConvertEmptyStringsToNull` only for `POST
+  {prefix}/{key}` with a real 32-character key, on `inbound.route.domain` when one is set. Before,
+  an empty `inbound.route.prefix` switched them off for every POST of the host app, and any POST
+  under the prefix (on any domain) lost them too. `Route::webhooks()` matches the same way.
 
 ## 1.0.0 - 2026-11-08
 

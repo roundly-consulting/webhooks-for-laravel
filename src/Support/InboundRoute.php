@@ -37,14 +37,20 @@ final class InboundRoute
     /**
      * Laravel's global TrimStrings / ConvertEmptyStringsToNull walk and rewrite every value of a
      * JSON request's decoded input — work the pipeline never uses (it verifies and decodes the
-     * raw body itself). Skip them for inbound posts under the prefix. This does not bound the
-     * body: `Request::capture()` has read and decoded a JSON body before any middleware runs, so
-     * only the web server's body limit comes before that.
+     * raw body itself). Skip them for inbound posts only: `POST {prefix}/{key}` with a key of the
+     * real shape, on the route's domain when it has one — every other post of the host keeps
+     * them. This does not bound the body: `Request::capture()` has read and decoded a JSON body
+     * before any middleware runs, so only the web server's body limit comes before that.
      */
-    public static function skipBodyDecoding(string $prefix): void
+    public static function skipBodyDecoding(string $prefix, ?string $domain = null): void
     {
         $prefix = trim($prefix, '/');
-        $inbound = static fn (Request $request): bool => $request->isMethod('POST') && $request->is(($prefix === '' ? '' : $prefix.'/').'*');
+        $path = '#^'.($prefix === '' ? '' : preg_quote($prefix, '#').'/').UrlKeys::PATTERN.'$#D';
+        // A `{parameter}` of a route domain matches one label, as Laravel's domain routing does.
+        $host = $domain === null ? null : '#^'.preg_replace('/\\\{[^.]+?\\\}/', '[^.]+', preg_quote(strtolower($domain), '#')).'$#D';
+        $inbound = static fn (Request $request): bool => $request->isMethod('POST')
+            && preg_match($path, $request->decodedPath()) === 1
+            && ($host === null || preg_match($host, strtolower($request->getHost())) === 1);
 
         TrimStrings::skipWhen($inbound);
         ConvertEmptyStringsToNull::skipWhen($inbound);

@@ -36,6 +36,7 @@ use RoundlyConsulting\Webhooks\Models\InboundDelivery;
 use RoundlyConsulting\Webhooks\Models\InboundEndpoint;
 use RoundlyConsulting\Webhooks\Schemes\DefaultScheme;
 use RoundlyConsulting\Webhooks\Schemes\EndpointSecrets;
+use RoundlyConsulting\Webhooks\Support\InboundRoute;
 use RoundlyConsulting\Webhooks\Support\KeyRedactingSanitizer;
 use RoundlyConsulting\Webhooks\Support\MacEngine;
 use RoundlyConsulting\Webhooks\Testing\SignedWebhookRequest;
@@ -385,6 +386,31 @@ it('global_middleware_never_decodes_an_inbound_body', function (): void {
 
     expect(InboundDelivery::query()->sole()->payload)->toBe(['name' => '  padded  ', 'empty' => '']);
 });
+
+it('keeps the host\'s input middleware on every post but an inbound key path', function (string $prefix, ?string $domain, string $url, bool $skipped): void {
+    TrimStrings::flushState();
+    ConvertEmptyStringsToNull::flushState();
+    $kernel = app(Kernel::class);
+    $kernel->pushMiddleware(TrimStrings::class);
+    $kernel->pushMiddleware(ConvertEmptyStringsToNull::class);
+    Route::post('{any}', static fn (Request $request) => response()->json($request->all()))->where('any', '.*');
+
+    InboundRoute::skipBodyDecoding($prefix, $domain);
+
+    $this->postJson($url, ['name' => '  x  ', 'blank' => ''])
+        ->assertExactJson($skipped ? ['name' => '  x  ', 'blank' => ''] : ['name' => 'x', 'blank' => null]);
+})->with([
+    'no prefix, a host route' => ['', null, 'http://localhost/profile', false],
+    'no prefix, a key' => ['', null, 'http://localhost/'.str_repeat('a', 32), true],
+    'no prefix, a key-length path with a slash' => ['', null, 'http://localhost/a/'.str_repeat('a', 30), false],
+    'a host route under the prefix' => ['hooks', null, 'http://localhost/hooks/settings', false],
+    'a key under the prefix' => ['/hooks/', null, 'http://localhost/hooks/'.str_repeat('Ab1', 10).'xy', true],
+    'a too-long key under the prefix' => ['hooks', null, 'http://localhost/hooks/'.str_repeat('a', 33), false],
+    'another domain' => ['hooks', 'in.example.com', 'http://app.example.com/hooks/'.str_repeat('a', 32), false],
+    'the route domain' => ['hooks', 'in.example.com', 'http://in.example.com/hooks/'.str_repeat('a', 32), true],
+    'a domain parameter' => ['hooks', '{tenant}.in.example.com', 'http://acme.in.example.com/hooks/'.str_repeat('a', 32), true],
+    'a domain parameter spanning labels' => ['hooks', '{tenant}.in.example.com', 'http://a.b.in.example.com/hooks/'.str_repeat('a', 32), false],
+]);
 
 it('the_sanitizer_redacts_before_storage_and_handlers', function (): void {
     postSigned(inboundEndpoint(), ['type' => 'user.created', 'user' => ['Password' => 'p4ss', 'nested' => ['api_key' => 'k']], 'token' => 't'])->assertStatus(202);

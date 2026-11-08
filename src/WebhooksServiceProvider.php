@@ -99,7 +99,7 @@ final class WebhooksServiceProvider extends PackageServiceProvider
         $this->app->make(Dispatcher::class)->listen(BroadcastsAsWebhook::class, BroadcastEventAsWebhook::class);
 
         if (WebhooksConfig::routeEnabled()) {
-            InboundRoute::skipBodyDecoding(WebhooksConfig::routePrefix());
+            InboundRoute::skipBodyDecoding(WebhooksConfig::routePrefix(), WebhooksConfig::routeDomain());
         }
 
         // Route::webhooks('hooks', ['throttle:webhooks']) — a host's own inbound route.
