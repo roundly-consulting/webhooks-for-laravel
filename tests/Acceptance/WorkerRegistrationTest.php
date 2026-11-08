@@ -39,7 +39,9 @@ afterEach(fn () => CarbonImmutable::setTestNow());
 
 function workThreeJobs(): void
 {
-    Artisan::call('queue:work', ['connection' => 'database', '--max-jobs' => 3, '--stop-when-empty' => true, '--sleep' => 0, '--tries' => 1]);
+    // --memory 0: the worker measures the whole test process, and a long serial run is past its
+    // 128 MB default — it would stop after the first job.
+    expect(Artisan::call('queue:work', ['connection' => 'database', '--max-jobs' => 3, '--stop-when-empty' => true, '--sleep' => 0, '--tries' => 1, '--memory' => 0]))->toBe(0);
 }
 
 it('a_handler_registered_in_boot_runs_for_every_job_one_worker_processes', function (): void {

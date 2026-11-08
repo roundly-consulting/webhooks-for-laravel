@@ -34,7 +34,9 @@ afterEach(fn () => CarbonImmutable::setTestNow());
 
 function drainQueue(): void
 {
-    Artisan::call('queue:work', ['connection' => 'database', '--stop-when-empty' => true, '--sleep' => 0, '--tries' => 1]);
+    // --memory 0: the worker measures the whole test process, and a long serial run is past its
+    // 128 MB default — it would stop after the first job.
+    expect(Artisan::call('queue:work', ['connection' => 'database', '--stop-when-empty' => true, '--sleep' => 0, '--tries' => 1, '--memory' => 0]))->toBe(0);
 }
 
 it('done_means_an_inbound_endpoint_queues_its_handler_exactly_once', function (): void {
