@@ -48,9 +48,9 @@ final readonly class DispatchDueDeliveriesAction
             ->where(static fn (Builder $query) => $query->whereNull('claimed_until')->orWhere('claimed_until', '<', Clock::format($now)))
             ->where(static fn (Builder $query) => $query
                 ->where(static fn (Builder $due) => $due->whereNull('dispatch_token')->where(static fn (Builder $at) => $at->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', Clock::format($now))))
-                ->orWhere(static fn (Builder $lost) => $lost->whereNotNull('dispatch_token')->where(static fn (Builder $at) => $at
-                    ->where('next_attempt_at', '<=', $stale)
-                    ->orWhere(static fn (Builder $first) => $first->whereNull('next_attempt_at')->where('dispatched_at', '<=', $stale)))))
+                ->orWhere(static fn (Builder $lost) => $lost->whereNotNull('dispatch_token')
+                    ->where('dispatched_at', '<=', $stale)
+                    ->where(static fn (Builder $at) => $at->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', $stale))))
             ->chunkById(self::CHUNK, function ($deliveries) use (&$count): void {
                 foreach ($deliveries as $delivery) {
                     $this->queues->outbound($delivery);
