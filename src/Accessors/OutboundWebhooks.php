@@ -99,9 +99,9 @@ final readonly class OutboundWebhooks
     /**
      * @param  array<array-key, mixed>|Arrayable<array-key, mixed>|JsonSerializable  $payload
      */
-    public function send(OutboundEndpoint $endpoint, string $eventType, array|Arrayable|JsonSerializable $payload): OutboundDelivery
+    public function send(OutboundEndpoint $endpoint, string $eventType, array|Arrayable|JsonSerializable $payload, ?string $id = null): OutboundDelivery
     {
-        return $this->manager->send($this->guard($endpoint), $eventType, $payload);
+        return $this->manager->send($this->guard($endpoint), $eventType, $payload, $id);
     }
 
     /**

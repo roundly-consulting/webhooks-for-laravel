@@ -45,7 +45,8 @@
         "roundly-consulting/http-client-rate-limits-for-laravel": "^2.0",
         "roundly-consulting/package-toolkit-for-laravel": "^2.0",
         "roundly-consulting/safe-fetch-for-laravel": "@dev",
-        "roundly-consulting/sentinel-for-laravel": "^2.1"
+        "roundly-consulting/sentinel-for-laravel": "^2.1",
+        "symfony/uid": "^7.4|^8.0"
     },
     "require-dev": {
         "larastan/larastan": "^3.0",

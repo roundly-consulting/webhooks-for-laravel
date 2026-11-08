@@ -68,13 +68,14 @@ class WebhooksManager
     ) {}
 
     /**
-     * Queue one event for one endpoint — signed, retried, throttled and SSRF-guarded.
+     * Queue one event for one endpoint — signed, retried, throttled and SSRF-guarded. With `$id`
+     * the send is idempotent: a repeat with the same id returns the first delivery.
      *
      * @param  array<array-key, mixed>|Arrayable<array-key, mixed>|JsonSerializable  $payload
      */
-    public function send(OutboundEndpoint $endpoint, string $eventType, array|Arrayable|JsonSerializable $payload): OutboundDelivery
+    public function send(OutboundEndpoint $endpoint, string $eventType, array|Arrayable|JsonSerializable $payload, ?string $id = null): OutboundDelivery
     {
-        return $this->container->make(SendWebhookAction::class)->execute($endpoint, $eventType, $payload);
+        return $this->container->make(SendWebhookAction::class)->execute($endpoint, $eventType, $payload, $id);
     }
 
     /**

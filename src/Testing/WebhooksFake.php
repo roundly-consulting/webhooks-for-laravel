@@ -10,13 +10,13 @@ use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Str;
 use InvalidArgumentException;
 use JsonSerializable;
 use PHPUnit\Framework\Assert as PHPUnit;
 use RoundlyConsulting\Webhooks\Actions\Outbound\BroadcastWebhookAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\RedeliverFailedDeliveriesAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\RedeliverWebhookAction;
+use RoundlyConsulting\Webhooks\Actions\Outbound\SendWebhookAction;
 use RoundlyConsulting\Webhooks\DataTransferObjects\RedeliveryResult;
 use RoundlyConsulting\Webhooks\DataTransferObjects\RotatedSecret;
 use RoundlyConsulting\Webhooks\Enums\InboundStatus;
@@ -75,9 +75,9 @@ final class WebhooksFake extends WebhooksManager
     /**
      * @param  array<array-key, mixed>|Arrayable<array-key, mixed>|JsonSerializable  $payload
      */
-    public function send(OutboundEndpoint $endpoint, string $eventType, array|Arrayable|JsonSerializable $payload): OutboundDelivery
+    public function send(OutboundEndpoint $endpoint, string $eventType, array|Arrayable|JsonSerializable $payload, ?string $id = null): OutboundDelivery
     {
-        return $this->record($endpoint, $eventType, $payload, false);
+        return $this->record($endpoint, $eventType, $payload, false, $id);
     }
 
     /**
@@ -368,16 +368,20 @@ final class WebhooksFake extends WebhooksManager
     /**
      * @param  array<array-key, mixed>|Arrayable<array-key, mixed>|JsonSerializable  $payload
      */
-    private function record(OutboundEndpoint $endpoint, string $eventType, array|Arrayable|JsonSerializable $payload, bool $broadcast): OutboundDelivery
+    private function record(OutboundEndpoint $endpoint, string $eventType, array|Arrayable|JsonSerializable $payload, bool $broadcast, ?string $id = null): OutboundDelivery
     {
         $body = OutboundMessages::body($endpoint, $eventType, $payload);
         $decoded = json_decode($body, true);
         $data = is_array($decoded) && WebhooksConfig::envelope() ? ($decoded['data'] ?? []) : $decoded;
 
-        $publicId = (string) Str::ulid();
+        $publicId = SendWebhookAction::publicId($endpoint, $id);
         $owner = $endpoint->owner;
+        $repeat = $id !== null && array_filter($this->sent, static fn (SentWebhook $sent): bool => $sent->webhookId === OutboundDelivery::ID_PREFIX.$publicId) !== [];
 
-        $this->sent[] = new SentWebhook($endpoint, $eventType, is_array($data) ? $data : [], $body, $broadcast, $owner instanceof Model ? $owner : null, OutboundDelivery::ID_PREFIX.$publicId);
+        // An idempotent repeat queues nothing in production: nothing is recorded either.
+        if (! $repeat) {
+            $this->sent[] = new SentWebhook($endpoint, $eventType, is_array($data) ? $data : [], $body, $broadcast, $owner instanceof Model ? $owner : null, OutboundDelivery::ID_PREFIX.$publicId);
+        }
 
         $class = ModelSeams::outboundDelivery();
         $delivery = new $class;

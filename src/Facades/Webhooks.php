@@ -11,7 +11,7 @@ use RoundlyConsulting\Webhooks\WebhooksManager;
 /**
  * Receive and send signed webhooks.
  *
- * @method static \RoundlyConsulting\Webhooks\Models\OutboundDelivery send(\RoundlyConsulting\Webhooks\Models\OutboundEndpoint $endpoint, string $eventType, array<array-key, mixed>|\Illuminate\Contracts\Support\Arrayable<array-key, mixed>|\JsonSerializable $payload)
+ * @method static \RoundlyConsulting\Webhooks\Models\OutboundDelivery send(\RoundlyConsulting\Webhooks\Models\OutboundEndpoint $endpoint, string $eventType, array<array-key, mixed>|\Illuminate\Contracts\Support\Arrayable<array-key, mixed>|\JsonSerializable $payload, string|null $id = null)
  * @method static \Illuminate\Support\Collection<int, \RoundlyConsulting\Webhooks\Models\OutboundDelivery> broadcast(string $eventType, array<array-key, mixed>|\Illuminate\Contracts\Support\Arrayable<array-key, mixed>|\JsonSerializable $payload, \Illuminate\Database\Eloquent\Model|null $owner = null)
  * @method static \RoundlyConsulting\Webhooks\Accessors\OwnerWebhooks for(\Illuminate\Database\Eloquent\Model $owner)
  * @method static \RoundlyConsulting\Webhooks\Accessors\InboundWebhooks inbound()

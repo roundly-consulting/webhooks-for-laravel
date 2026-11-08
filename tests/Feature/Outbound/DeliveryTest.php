@@ -7,6 +7,7 @@ use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Psr7\Request as PsrRequest;
 use Illuminate\Contracts\Queue\Job;
 use Illuminate\Http\Client\Request as ClientRequest;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -17,6 +18,7 @@ use RoundlyConsulting\HttpClientRateLimits\RateLimitManager;
 use RoundlyConsulting\Sentinel\Jobs\Middleware\Idempotent;
 use RoundlyConsulting\Webhooks\Actions\Outbound\AttemptDeliveryAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\DisableOutboundEndpointAction;
+use RoundlyConsulting\Webhooks\Actions\Outbound\SendWebhookAction;
 use RoundlyConsulting\Webhooks\Enums\AttemptError;
 use RoundlyConsulting\Webhooks\Enums\DisableReason;
 use RoundlyConsulting\Webhooks\Enums\OutboundStatus;
@@ -535,4 +537,50 @@ it('jobs_expose_horizon_tags', function (): void {
         ->and($process->tags())->toBe(['webhooks', 'webhooks:inbound', 'webhooks:delivery:9', 'webhooks:run:2'])
         ->and($process->displayName())->toBe('webhooks: replay')
         ->and((new ProcessInboundDelivery(9))->displayName())->toBe('webhooks: process');
+});
+
+it('send_with_the_same_id_queues_one_delivery', function (): void {
+    $endpoint = outboundEndpoint();
+    $other = outboundEndpoint('https://other.example.com/in');
+
+    DB::transaction(function () use ($endpoint, $other): void {
+        $first = Webhooks::send($endpoint, 'invoice.paid', ['invoice' => 42], id: 'invoice-42-paid');
+        $repeat = Webhooks::outbound()->send($endpoint, 'invoice.paid', ['invoice' => 42, 'changed' => true], id: 'invoice-42-paid');
+        $elsewhere = Webhooks::send($other, 'invoice.paid', ['invoice' => 42], id: 'invoice-42-paid');
+        $plain = Webhooks::send($endpoint, 'invoice.paid', ['invoice' => 42]);
+
+        expect($repeat->is($first))->toBeTrue()
+            ->and($repeat->webhookId())->toBe($first->webhookId())
+            ->and($first->webhookId())->toMatch('/^msg_[0-9A-HJKMNP-TV-Z]{26}$/')
+            ->and($elsewhere->webhookId())->not->toBe($first->webhookId())
+            ->and($plain->webhookId())->not->toBe($first->webhookId())
+            ->and($first->refresh()->body)->not->toContain('changed');
+    });
+
+    // Deterministic: the same endpoint and id always give the same webhook-id.
+    expect(OutboundDelivery::query()->count())->toBe(3)
+        ->and(SendWebhookAction::publicId($endpoint, 'invoice-42-paid'))->toBe(SendWebhookAction::publicId($endpoint, 'invoice-42-paid'));
+    Queue::assertPushed(DeliverWebhook::class, 3);
+});
+
+it('an_idempotent_repeat_returns_the_stored_delivery_even_soft_deleted', function (): void {
+    $endpoint = outboundEndpoint();
+    $twin = OutboundDelivery::factory()->create(['endpoint_id' => $endpoint->getKey(), 'public_id' => SendWebhookAction::publicId($endpoint, 'race')]);
+    $deleted = OutboundDelivery::factory()->create(['endpoint_id' => $endpoint->getKey(), 'public_id' => SendWebhookAction::publicId($endpoint, 'gone')]);
+    $deleted->delete();
+
+    expect(Webhooks::send($endpoint, 'invoice.paid', [], id: 'race')->is($twin))->toBeTrue()
+        ->and(Webhooks::send($endpoint, 'invoice.paid', [], id: 'gone')->is($deleted))->toBeTrue();
+    Queue::assertNothingPushed();
+});
+
+it('fake_records_an_idempotent_send_once', function (): void {
+    $endpoint = outboundEndpoint();
+    $fake = Webhooks::fake();
+
+    $first = Webhooks::send($endpoint, 'invoice.paid', [], id: 'same');
+    $repeat = Webhooks::send($endpoint, 'invoice.paid', [], id: 'same');
+
+    expect($repeat->webhookId())->toBe($first->webhookId());
+    $fake->assertSentTimes(1, 'invoice.paid');
 });
