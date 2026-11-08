@@ -300,3 +300,19 @@ it('builds its policy from the host policy and its own settings', function (): v
         ->and($policy->redirects->max)->toBe(2)
         ->and($policy->redirects->forwardHeaders)->toBe(['webhook-id', 'webhook-timestamp', 'webhook-signature']);
 });
+
+it('stops_sending_a_stored_header_whose_override_was_revoked', function (): void {
+    Http::fake(['*' => Http::response('ok')]);
+    config()->set('webhooks.outbound.headers.allowed_overrides', ['authorization']);
+    $endpoint = Webhooks::outbound()->create('https://hooks.example.com/in', headers: ['Authorization' => 'Bearer t', 'X-Tenant' => 'acme'])->endpoint;
+    // A row written around the actions is checked at send time too.
+    $raw = outboundEndpoint(attributes: ['headers' => ['content-length' => '1', 'x-other' => 'ok']]);
+
+    config()->set('webhooks.outbound.headers.allowed_overrides', []);
+    attempt(Webhooks::send($endpoint, 'invoice.paid', []));
+    attempt(Webhooks::send($raw, 'invoice.paid', []));
+
+    Http::assertSent(fn (ClientRequest $request): bool => $request->hasHeader('X-Tenant') && ! $request->hasHeader('Authorization'));
+    Http::assertSent(fn (ClientRequest $request): bool => $request->hasHeader('X-Other') && $request->header('Content-Length') !== ['1']);
+    Http::assertNotSent(fn (ClientRequest $request): bool => $request->hasHeader('Authorization'));
+});

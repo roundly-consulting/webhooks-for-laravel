@@ -39,6 +39,7 @@ use RoundlyConsulting\Webhooks\Support\Backoff;
 use RoundlyConsulting\Webhooks\Support\BodyReader;
 use RoundlyConsulting\Webhooks\Support\Clock;
 use RoundlyConsulting\Webhooks\Support\DestinationPolicyFactory;
+use RoundlyConsulting\Webhooks\Support\HeaderRules;
 use RoundlyConsulting\Webhooks\Support\Keys;
 use RoundlyConsulting\Webhooks\Support\MacEngine;
 use RoundlyConsulting\Webhooks\Support\ModelSeams;
@@ -204,7 +205,7 @@ final readonly class AttemptDeliveryAction
         $request = $this->http->rateLimit($limit)
             ->connectTimeout(WebhooksConfig::connectTimeout())
             ->timeout(WebhooksConfig::totalTimeout())
-            ->withHeaders([...($endpoint->headers ?? []), 'User-Agent' => WebhooksConfig::userAgent()]);
+            ->withHeaders([...HeaderRules::sendable($endpoint->headers ?? []), 'User-Agent' => WebhooksConfig::userAgent()]);
 
         $request = $this->sign($request, $delivery, $endpoint, $body);
         // Guarded: safe-fetch reads at most max_response_bytes. Unguarded: a sink keeps one byte

@@ -39,22 +39,15 @@ final class HeaderRules
         $overrides = WebhooksConfig::allowedHeaderOverrides();
 
         foreach ($headers as $name => $value) {
-            if (! is_string($name) || preg_match('/^[!#$%&\'*+.^_`|~0-9A-Za-z-]{1,128}$/D', $name) !== 1) {
-                throw InvalidEndpointException::header('name');
-            }
+            $problem = self::problem($name, $value, $overrides);
 
-            $lower = strtolower($name);
-
-            if (! is_string($value) || preg_match('/[\r\n\x00]/', $value) === 1) {
-                throw InvalidEndpointException::header('value');
-            }
-
-            if (self::reserved($lower) && ! (in_array($lower, self::OVERRIDABLE, true) && in_array($lower, $overrides, true))) {
-                throw InvalidEndpointException::header('reserved');
+            // (The string checks only restate what problem() verified, for the types.)
+            if ($problem !== null || ! is_string($name) || ! is_string($value)) {
+                throw InvalidEndpointException::header($problem ?? 'value');
             }
 
             $size += strlen($name) + strlen($value);
-            $valid[$lower] = $value;
+            $valid[strtolower($name)] = $value;
         }
 
         if ($size > 8192) {
@@ -62,6 +55,49 @@ final class HeaderRules
         }
 
         return $valid;
+    }
+
+    /**
+     * The stored headers that may still be sent — re-checked on every attempt, so a revoked
+     * override (or a row written around the actions) is dropped, never sent.
+     *
+     * @param  array<array-key, mixed>  $headers
+     * @return array<string, string> lower-cased names
+     */
+    public static function sendable(array $headers): array
+    {
+        $overrides = WebhooksConfig::allowedHeaderOverrides();
+        $sendable = [];
+
+        foreach ($headers as $name => $value) {
+            if (is_string($name) && is_string($value) && self::problem($name, $value, $overrides) === null) {
+                $sendable[strtolower($name)] = $value;
+            }
+        }
+
+        return $sendable;
+    }
+
+    /**
+     * @param  list<string>  $overrides
+     */
+    private static function problem(mixed $name, mixed $value, array $overrides): ?string
+    {
+        if (! is_string($name) || preg_match('/^[!#$%&\'*+.^_`|~0-9A-Za-z-]{1,128}$/D', $name) !== 1) {
+            return 'name';
+        }
+
+        $lower = strtolower($name);
+
+        if (! is_string($value) || preg_match('/[\r\n\x00]/', $value) === 1) {
+            return 'value';
+        }
+
+        if (self::reserved($lower) && ! (in_array($lower, self::OVERRIDABLE, true) && in_array($lower, $overrides, true))) {
+            return 'reserved';
+        }
+
+        return null;
     }
 
     public static function reserved(string $name): bool
