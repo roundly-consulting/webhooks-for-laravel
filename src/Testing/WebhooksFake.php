@@ -14,9 +14,9 @@ use InvalidArgumentException;
 use JsonSerializable;
 use PHPUnit\Framework\Assert as PHPUnit;
 use RoundlyConsulting\Webhooks\Actions\Outbound\BroadcastWebhookAction;
+use RoundlyConsulting\Webhooks\Actions\Outbound\PingEndpointAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\RedeliverFailedDeliveriesAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\RedeliverWebhookAction;
-use RoundlyConsulting\Webhooks\Actions\Outbound\SendWebhookAction;
 use RoundlyConsulting\Webhooks\DataTransferObjects\RedeliveryResult;
 use RoundlyConsulting\Webhooks\DataTransferObjects\RotatedSecret;
 use RoundlyConsulting\Webhooks\Enums\InboundStatus;
@@ -30,6 +30,7 @@ use RoundlyConsulting\Webhooks\Models\OutboundDelivery;
 use RoundlyConsulting\Webhooks\Models\OutboundEndpoint;
 use RoundlyConsulting\Webhooks\Support\EventTypes;
 use RoundlyConsulting\Webhooks\Support\ModelSeams;
+use RoundlyConsulting\Webhooks\Support\OutboundDeliveries;
 use RoundlyConsulting\Webhooks\Support\OutboundMessages;
 use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
 use RoundlyConsulting\Webhooks\WebhooksManager;
@@ -92,6 +93,18 @@ final class WebhooksFake extends WebhooksManager
 
         return BroadcastWebhookAction::targets($eventType, $owner)
             ->map(fn (OutboundEndpoint $endpoint): OutboundDelivery => $this->record($endpoint, $eventType, $payload, true));
+    }
+
+    /**
+     * Recorded like a send of `webhook.ping` (`assertSent($endpoint, 'webhook.ping')`).
+     */
+    public function ping(OutboundEndpoint $endpoint): OutboundDelivery
+    {
+        if (! $endpoint->enabled || $endpoint->trashed()) {
+            throw EndpointNotAcceptingException::disabled();
+        }
+
+        return $this->recordBody($endpoint, PingEndpointAction::EVENT_TYPE, OutboundMessages::encode(PingEndpointAction::EVENT_TYPE, ['ping' => true]), false, null);
     }
 
     public function redeliver(OutboundDelivery $delivery): OutboundDelivery
@@ -370,11 +383,15 @@ final class WebhooksFake extends WebhooksManager
      */
     private function record(OutboundEndpoint $endpoint, string $eventType, array|Arrayable|JsonSerializable $payload, bool $broadcast, ?string $id = null): OutboundDelivery
     {
-        $body = OutboundMessages::body($endpoint, $eventType, $payload);
+        return $this->recordBody($endpoint, $eventType, OutboundMessages::body($endpoint, $eventType, $payload), $broadcast, $id);
+    }
+
+    private function recordBody(OutboundEndpoint $endpoint, string $eventType, string $body, bool $broadcast, ?string $id): OutboundDelivery
+    {
         $decoded = json_decode($body, true);
         $data = is_array($decoded) && WebhooksConfig::envelope() ? ($decoded['data'] ?? []) : $decoded;
 
-        $publicId = SendWebhookAction::publicId($endpoint, $id);
+        $publicId = OutboundDeliveries::publicId($endpoint, $id);
         $owner = $endpoint->owner;
         $repeat = $id !== null && array_filter($this->sent, static fn (SentWebhook $sent): bool => $sent->webhookId === OutboundDelivery::ID_PREFIX.$publicId) !== [];
 

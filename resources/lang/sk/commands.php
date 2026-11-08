@@ -41,4 +41,10 @@ return [
     'redelivered_bulk' => 'Znova zaradené doručenia: :queued; preskočené pre vyčistené telo: :skipped.',
     'invalid_since' => 'Hodnota --since nie je dátum.',
     'endpoint_not_found' => 'Endpoint sa nenašiel.',
+    'endpoint_disabled' => 'Endpoint je vypnutý: najprv ho zapnite (webhooks:enable).',
+    'pinged' => 'Testovacia udalosť webhook.ping bola zaradená do fronty (:id).',
+    'invalid_direction' => 'Zadajte smer (inbound alebo outbound) a identifikátor endpointu.',
+    'enabled' => 'Endpoint je zapnutý.',
+    'invalid_owner' => 'Zadajte vlastníka ako „morph-class:id“, napr. --owner="App\\Models\\Team:5".',
+    'no_endpoints' => 'Žiadne endpointy.',
 ];

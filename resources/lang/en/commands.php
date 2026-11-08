@@ -41,4 +41,10 @@ return [
     'redelivered_bulk' => 'Queued :queued delivery(ies) again; skipped :skipped whose body was pruned.',
     'invalid_since' => 'The --since value is not a date.',
     'endpoint_not_found' => 'The endpoint was not found.',
+    'endpoint_disabled' => 'The endpoint is disabled: enable it first (webhooks:enable).',
+    'pinged' => 'A webhook.ping test event was queued (:id).',
+    'invalid_direction' => 'Give a direction (inbound or outbound) and an endpoint id.',
+    'enabled' => 'The endpoint is enabled.',
+    'invalid_owner' => 'Give the owner as "morph-class:id", e.g. --owner="App\\Models\\Team:5".',
+    'no_endpoints' => 'No endpoints.',
 ];

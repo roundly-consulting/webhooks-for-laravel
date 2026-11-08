@@ -28,6 +28,7 @@ use RoundlyConsulting\Webhooks\Actions\Outbound\BroadcastWebhookAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\CreateOutboundEndpointAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\DeleteOutboundEndpointAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\DispatchDueDeliveriesAction;
+use RoundlyConsulting\Webhooks\Actions\Outbound\PingEndpointAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\RedeliverFailedDeliveriesAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\RedeliverWebhookAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\RotateOutboundSecretAction;
@@ -249,6 +250,14 @@ class WebhooksManager
     public function redeliver(OutboundDelivery $delivery): OutboundDelivery
     {
         return $this->container->make(RedeliverWebhookAction::class)->execute($delivery);
+    }
+
+    /**
+     * @internal what `outbound()->ping()` (and `webhooks:ping`) calls
+     */
+    public function ping(OutboundEndpoint $endpoint): OutboundDelivery
+    {
+        return $this->container->make(PingEndpointAction::class)->execute($endpoint);
     }
 
     /**

@@ -19,7 +19,10 @@ use RoundlyConsulting\PackageToolkit\PackageServiceProvider;
 use RoundlyConsulting\Webhooks\Accessors\HandlerRegistry;
 use RoundlyConsulting\Webhooks\Accessors\SchemeRegistry;
 use RoundlyConsulting\Webhooks\Commands\DoctorCommand;
+use RoundlyConsulting\Webhooks\Commands\EnableCommand;
+use RoundlyConsulting\Webhooks\Commands\EndpointsCommand;
 use RoundlyConsulting\Webhooks\Commands\InstallCommand;
+use RoundlyConsulting\Webhooks\Commands\PingCommand;
 use RoundlyConsulting\Webhooks\Commands\PruneCommand;
 use RoundlyConsulting\Webhooks\Commands\RedeliverCommand;
 use RoundlyConsulting\Webhooks\Commands\ReplayCommand;
@@ -52,6 +55,9 @@ final class WebhooksServiceProvider extends PackageServiceProvider
                 RotateSecretCommand::class,
                 RedeliverCommand::class,
                 ReplayCommand::class,
+                EndpointsCommand::class,
+                EnableCommand::class,
+                PingCommand::class,
             ])
             ->contributesToAbout(static fn (): array => [
                 'Route prefix' => WebhooksConfig::routeEnabled() ? '/'.WebhooksConfig::routePrefix().'/{key}' : 'OFF',

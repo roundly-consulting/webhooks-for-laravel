@@ -105,6 +105,14 @@ final readonly class OutboundWebhooks
     }
 
     /**
+     * Send a `webhook.ping` test event — whatever the endpoint subscribes to.
+     */
+    public function ping(OutboundEndpoint $endpoint): OutboundDelivery
+    {
+        return $this->manager->ping($this->guard($endpoint));
+    }
+
+    /**
      * Send a finished delivery again (same `webhook-id`, a new series of attempts).
      */
     public function redeliver(OutboundDelivery $delivery): OutboundDelivery

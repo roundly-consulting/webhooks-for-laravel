@@ -18,7 +18,6 @@ use RoundlyConsulting\HttpClientRateLimits\RateLimitManager;
 use RoundlyConsulting\Sentinel\Jobs\Middleware\Idempotent;
 use RoundlyConsulting\Webhooks\Actions\Outbound\AttemptDeliveryAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\DisableOutboundEndpointAction;
-use RoundlyConsulting\Webhooks\Actions\Outbound\SendWebhookAction;
 use RoundlyConsulting\Webhooks\Enums\AttemptError;
 use RoundlyConsulting\Webhooks\Enums\DisableReason;
 use RoundlyConsulting\Webhooks\Enums\OutboundStatus;
@@ -37,6 +36,7 @@ use RoundlyConsulting\Webhooks\Jobs\ProcessInboundDelivery;
 use RoundlyConsulting\Webhooks\Models\OutboundAttempt;
 use RoundlyConsulting\Webhooks\Models\OutboundDelivery;
 use RoundlyConsulting\Webhooks\Support\Backoff;
+use RoundlyConsulting\Webhooks\Support\OutboundDeliveries;
 use RoundlyConsulting\Webhooks\Tests\Support\FixedRandomizer;
 
 beforeEach(function (): void {
@@ -559,14 +559,14 @@ it('send_with_the_same_id_queues_one_delivery', function (): void {
 
     // Deterministic: the same endpoint and id always give the same webhook-id.
     expect(OutboundDelivery::query()->count())->toBe(3)
-        ->and(SendWebhookAction::publicId($endpoint, 'invoice-42-paid'))->toBe(SendWebhookAction::publicId($endpoint, 'invoice-42-paid'));
+        ->and(OutboundDeliveries::publicId($endpoint, 'invoice-42-paid'))->toBe(OutboundDeliveries::publicId($endpoint, 'invoice-42-paid'));
     Queue::assertPushed(DeliverWebhook::class, 3);
 });
 
 it('an_idempotent_repeat_returns_the_stored_delivery_even_soft_deleted', function (): void {
     $endpoint = outboundEndpoint();
-    $twin = OutboundDelivery::factory()->create(['endpoint_id' => $endpoint->getKey(), 'public_id' => SendWebhookAction::publicId($endpoint, 'race')]);
-    $deleted = OutboundDelivery::factory()->create(['endpoint_id' => $endpoint->getKey(), 'public_id' => SendWebhookAction::publicId($endpoint, 'gone')]);
+    $twin = OutboundDelivery::factory()->create(['endpoint_id' => $endpoint->getKey(), 'public_id' => OutboundDeliveries::publicId($endpoint, 'race')]);
+    $deleted = OutboundDelivery::factory()->create(['endpoint_id' => $endpoint->getKey(), 'public_id' => OutboundDeliveries::publicId($endpoint, 'gone')]);
     $deleted->delete();
 
     expect(Webhooks::send($endpoint, 'invoice.paid', [], id: 'race')->is($twin))->toBeTrue()
