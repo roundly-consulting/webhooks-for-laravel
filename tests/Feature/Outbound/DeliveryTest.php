@@ -616,3 +616,35 @@ it('a_unique_violation_that_is_not_a_twin_is_thrown', function (): void {
 
     expect(fn () => Webhooks::send($endpoint, 'invoice.paid', []))->toThrow(UniqueConstraintViolationException::class);
 });
+
+it('records an unexpected exception as a retried attempt and never strands the row', function (): void {
+    Event::fake([DeliveryFailed::class]);
+    config()->set('webhooks.outbound.max_attempts', 2);
+    Http::fake(['*' => Http::response('ok')]);
+    // A host-wide option the SSRF guard refuses: every attempt throws inside the action.
+    Http::globalOptions(['proxy' => 'http://proxy.internal:3128']);
+    $endpoint = outboundEndpoint();
+    $delivery = Webhooks::send($endpoint, 'invoice.paid', ['invoice' => 1]);
+
+    $delivery = attempt($delivery);
+
+    $first = OutboundAttempt::query()->sole();
+    expect($delivery->status)->toBe(OutboundStatus::Retrying)
+        ->and($delivery->attempts)->toBe(1)
+        ->and($delivery->claimed_until)->toBeNull()
+        ->and($delivery->last_error_code)->toBe(AttemptError::Unexpected)
+        ->and($first->error_code)->toBe(AttemptError::Unexpected)
+        ->and($first->error_message)->toBe('UnsafeRequestOptions');
+
+    CarbonImmutable::setTestNow(CarbonImmutable::now()->addDay());
+    Webhooks::outbound()->dispatchDue();
+    $delivery = attempt($delivery);
+
+    // The last attempt fails the delivery like any other — but a fault on this side of the wire
+    // never counts towards disabling the receiver's endpoint.
+    expect($delivery->status)->toBe(OutboundStatus::Failed)
+        ->and($delivery->attempts)->toBe(2)
+        ->and($endpoint->refresh()->consecutive_failures)->toBe(0);
+    Event::assertDispatched(DeliveryFailed::class, fn (DeliveryFailed $event): bool => $event->final);
+    Http::assertNothingSent();
+});

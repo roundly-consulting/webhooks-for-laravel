@@ -44,6 +44,7 @@ use RoundlyConsulting\Webhooks\Support\MacEngine;
 use RoundlyConsulting\Webhooks\Support\ModelSeams;
 use RoundlyConsulting\Webhooks\Support\ResponseSink;
 use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
+use Throwable;
 
 /**
  * One attempt of an outbound delivery, run by `DeliverWebhook`:
@@ -55,7 +56,8 @@ use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
  *  4. vet + pin the destination on every hop (safe-fetch), sign with a fresh timestamp, POST the
  *     stored body, read a capped answer (guard off: through a capped sink) and flag a cut;
  *  5. record the attempt and classify: 2xx succeeds, 410 disables, a blocked destination fails
- *     for good, anything else retries with backoff (Retry-After honoured) until `max_attempts`.
+ *     for good, anything else retries with backoff (Retry-After honoured) until `max_attempts` —
+ *     an unexpected exception too (`unexpected`, reported), which never counts against the endpoint.
  *
  * @internal
  */
@@ -123,6 +125,12 @@ final readonly class AttemptDeliveryAction
             $outcome = self::connectionFailure($exception, $clock);
         } catch (SigningUnavailableException|UnknownSchemeException) {
             $outcome = self::failure(AttemptError::Signing, 'signing_unavailable', true, $clock);
+        } catch (Throwable $exception) {
+            // Anything else (a host-wide HTTP option the guard refuses, a secret that no longer
+            // decrypts, a throwing global middleware) is still an attempt: recorded and retried
+            // with backoff like a failure, never left `sending` for the sweep to call lost.
+            report($exception);
+            $outcome = self::failure(AttemptError::Unexpected, class_basename($exception), false, $clock);
         }
 
         $this->record($delivery, $endpoint, $started, $outcome);
@@ -287,7 +295,11 @@ final readonly class AttemptDeliveryAction
 
         if ($outcome->terminal || $number >= $delivery->max_attempts) {
             $this->fail($delivery, $attempt);
-            $this->failures->execute($endpoint);
+
+            // A fault on this side of the wire says nothing about the receiver's endpoint.
+            if ($outcome->error !== AttemptError::Unexpected) {
+                $this->failures->execute($endpoint);
+            }
 
             return;
         }

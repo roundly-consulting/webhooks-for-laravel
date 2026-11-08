@@ -16,8 +16,9 @@ use Throwable;
 /**
  * One outbound attempt. Delivery attempts are counted in the database, not by the queue:
  * `$tries = 0`, because every throttle release counts as a queue attempt (a worker's default
- * `--tries=1` would otherwise fail the job on its first re-run). An unexpected exception — the
- * database down — stops after `$maxExceptions` and hands the row to the sweep.
+ * `--tries=1` would otherwise fail the job on its first re-run). An exception during the attempt is
+ * recorded as an `unexpected` attempt by the action; one before it claimed the row (the database
+ * down) stops after `$maxExceptions` and hands the row to the sweep.
  */
 final class DeliverWebhook implements ShouldQueue
 {
