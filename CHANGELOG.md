@@ -14,7 +14,7 @@ Initial public release.
   secret shown once (generated `whsec_…`, or the sender's imported verbatim), rotation with a
   grace period in which both secrets verify, a handler alias, per-endpoint overrides.
 - **The inbound pipeline** behind `POST {prefix}/{key}` (or your own with
-  `Route::webhooks('hooks')`, which also keeps Laravel's body-decoding middleware off it, or
+  `Route::webhooks('hooks')`, which also keeps Laravel's input-rewriting middleware off it, or
   `Webhooks::inbound()->receive()`): unknown and disabled keys answer the same 404, a rejection
   guard per endpoint and IP, size (413) and content-type (415) checks before any signature work,
   a per-endpoint limit on verified deliveries (429 — checked before the signature, so an RFC 9421

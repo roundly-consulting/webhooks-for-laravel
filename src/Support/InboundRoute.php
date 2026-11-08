@@ -13,8 +13,8 @@ use RoundlyConsulting\Webhooks\Http\Controllers\ReceiveWebhookController;
 
 /**
  * Mounts the inbound pipeline: what `Route::webhooks()` does for a host that mounts its own
- * route — the `POST {prefix}/{key}` route named `webhooks.inbound`, and the body-decoding global
- * middleware switched off for that prefix.
+ * route — the `POST {prefix}/{key}` route named `webhooks.inbound`, and the input-rewriting
+ * global middleware switched off for that prefix.
  *
  * @internal
  */
@@ -35,9 +35,11 @@ final class InboundRoute
     }
 
     /**
-     * Laravel's global TrimStrings / ConvertEmptyStringsToNull decode a JSON body with
-     * `$request->json()` before any route runs — an unbounded body, before the size check, and
-     * a changed one can break a signature. Skip them for inbound posts under the prefix.
+     * Laravel's global TrimStrings / ConvertEmptyStringsToNull walk and rewrite every value of a
+     * JSON request's decoded input — work the pipeline never uses (it verifies and decodes the
+     * raw body itself). Skip them for inbound posts under the prefix. This does not bound the
+     * body: `Request::capture()` has read and decoded a JSON body before any middleware runs, so
+     * only the web server's body limit comes before that.
      */
     public static function skipBodyDecoding(string $prefix): void
     {
