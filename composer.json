@@ -44,7 +44,7 @@
         "roundly-consulting/enums-for-laravel": "^2.0",
         "roundly-consulting/http-client-rate-limits-for-laravel": "^2.0",
         "roundly-consulting/package-toolkit-for-laravel": "^2.0",
-        "roundly-consulting/safe-fetch-for-laravel": "@dev",
+        "roundly-consulting/safe-fetch-for-laravel": "^1.0",
         "roundly-consulting/sentinel-for-laravel": "^2.1",
         "symfony/uid": "^7.4|^8.0"
     },
@@ -96,21 +96,5 @@
                 "Webhooks": "RoundlyConsulting\\Webhooks\\Facades\\Webhooks"
             }
         }
-    },
-    "repositories": [
-        {
-            "type": "path",
-            "url": "../safe-fetch-for-laravel*",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "vcs",
-            "url": "https://github.com/roundly-consulting/safe-fetch-for-laravel",
-            "no-api": true
-        }
-    ],
-    "minimum-stability": "dev",
-    "prefer-stable": true
+    }
 }
