@@ -116,8 +116,9 @@ final readonly class ReceiveWebhookAction
 
         $idempotencyKey = self::idempotencyKey($verified, $request);
 
+        // No delivery id at all (a scheme without one, and no Idempotency-Key): a malformed request.
         if ($idempotencyKey === null) {
-            return $this->refuse($endpoint, $request, RejectionReason::MissingId, hit: false);
+            return $this->refuse($endpoint, $request, RejectionReason::MissingId, hit: false, status: 400);
         }
 
         try {
@@ -130,7 +131,14 @@ final readonly class ReceiveWebhookAction
             return Problem::response(RejectionReason::SanitizerFailed);
         }
 
-        return $result['duplicate'] ? $this->duplicate() : Problem::accepted($result['id']);
+        if ($result['duplicate']) {
+            // A duplicate of a delivery stored while the queue was down queues it now.
+            $this->accept->requeueStalled($endpoint, $idempotencyKey);
+
+            return $this->duplicate();
+        }
+
+        return Problem::accepted($result['id']);
     }
 
     /**
@@ -175,34 +183,34 @@ final readonly class ReceiveWebhookAction
             : Problem::response(RejectionReason::Conflict);
     }
 
-    private function refuse(InboundEndpoint $endpoint, Request $request, RejectionReason $reason, bool $hit = true): Response
+    private function refuse(InboundEndpoint $endpoint, Request $request, RejectionReason $reason, bool $hit = true, ?int $status = null): Response
     {
         if ($hit) {
             $this->limiter->hitRejection(Keys::of($endpoint), $request->ip() ?? 'unknown');
         }
 
-        $this->announce($endpoint, $request, $reason);
+        $this->announce($endpoint, $request, $reason, $status ?? $reason->status());
 
-        return Problem::response($reason);
+        return Problem::response($reason, status: $status);
     }
 
     private function rateLimited(InboundEndpoint $endpoint, Request $request, string $flag, int $wait): Response
     {
         if ($this->limiter->firstInWindow($flag)) {
-            $this->announce($endpoint, $request, RejectionReason::RateLimited);
+            $this->announce($endpoint, $request, RejectionReason::RateLimited, 429);
         }
 
         return Problem::response(RejectionReason::RateLimited, ['Retry-After' => (string) $wait]);
     }
 
-    private function announce(InboundEndpoint $endpoint, Request $request, RejectionReason $reason): void
+    private function announce(InboundEndpoint $endpoint, Request $request, RejectionReason $reason, int $status): void
     {
         $agent = $request->userAgent();
 
         $this->events->dispatch(new WebhookRejected(
             Keys::of($endpoint),
             $reason,
-            $reason->status(),
+            $status,
             $request->ip(),
             $agent === null ? null : mb_substr($agent, 0, 255),
         ));

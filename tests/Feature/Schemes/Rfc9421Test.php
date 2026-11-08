@@ -1,0 +1,134 @@
+<?php
+
+declare(strict_types=1);
+
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
+use RoundlyConsulting\Sentinel\Enums\Algorithm;
+use RoundlyConsulting\Sentinel\Facades\Sentinel;
+use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
+use RoundlyConsulting\Webhooks\DataTransferObjects\InboundEndpointOptions;
+use RoundlyConsulting\Webhooks\DataTransferObjects\OutboundEndpointOptions;
+use RoundlyConsulting\Webhooks\Enums\AttemptError;
+use RoundlyConsulting\Webhooks\Enums\OutboundStatus;
+use RoundlyConsulting\Webhooks\Facades\Webhooks;
+use RoundlyConsulting\Webhooks\Models\InboundDelivery;
+use RoundlyConsulting\Webhooks\Models\InboundEndpoint;
+use RoundlyConsulting\Webhooks\Testing\SignedWebhookRequest;
+
+const PARTNER_KEY = 'base64:cGFydG5lci1zaGFyZWQtc2VjcmV0LTMyLWJ5dGVzLWxvbmctZm9yLWhtYWM=';
+
+/**
+ * The partner signs with its key (ring `partner`, the outbound ring here); this app knows the
+ * same key verify-only in ring `http`, bound to the endpoint it belongs to.
+ */
+function rfc9421Endpoint(?InboundEndpoint $owner = null, array $options = ['id_header' => 'webhook-id']): InboundEndpoint
+{
+    config()->set('sentinel.keys.rings.partner', ['driver' => 'config', 'key_id' => 'partner', 'algorithm' => 'hmac-sha256', 'key' => PARTNER_KEY, 'algorithms' => ['hmac-sha256']]);
+    config()->set('sentinel.signatures.outbound.ring', 'partner');
+    config()->set('sentinel.keys.rings.http.driver', 'database');
+    app(KeyStoreManager::class)->flush();
+
+    $endpoint = Webhooks::inbound()->create(scheme: 'rfc9421', options: new InboundEndpointOptions(schemeOptions: $options))->endpoint;
+    Sentinel::keys()->ring('http')->import('partner', Algorithm::HmacSha256, PARTNER_KEY, owner: $owner ?? $endpoint);
+
+    return $endpoint;
+}
+
+beforeEach(fn () => Queue::fake());
+
+it('an_rfc9421_delivery_verifies_through_sentinel', function (): void {
+    $endpoint = rfc9421Endpoint();
+
+    SignedWebhookRequest::for($endpoint)->keyId('partner')->send()->assertStatus(202);
+
+    // The webhook-id header is a covered component here: the id is signed.
+    expect(InboundDelivery::query()->sole()->idempotency_key)->toStartWith('msg_');
+});
+
+it('the_signed_request_builder_is_accepted', function (): void {
+    postSigned(inboundEndpoint())->assertStatus(202);
+    SignedWebhookRequest::for(rfc9421Endpoint())->keyId('partner')->send()->assertStatus(202);
+});
+
+it('tampered_and_stale_builders_are_rejected', function (): void {
+    SignedWebhookRequest::for(inboundEndpoint())->tamper()->send()->assertStatus(401);
+    SignedWebhookRequest::for(inboundEndpoint())->staleBy(3600)->send()->assertStatus(401);
+    SignedWebhookRequest::for(rfc9421Endpoint())->keyId('partner')->tamper()->send()->assertStatus(401);
+});
+
+it('an_rfc9421_key_of_another_endpoint_is_refused', function (): void {
+    $other = InboundEndpoint::factory()->create();
+    $endpoint = rfc9421Endpoint($other);
+
+    SignedWebhookRequest::for($endpoint)->keyId('partner')->send()->assertStatus(401)->assertJson(['code' => 'key_not_bound']);
+});
+
+it('an_rfc9421_replay_answers_as_a_duplicate', function (): void {
+    $endpoint = rfc9421Endpoint();
+    $signed = SignedWebhookRequest::for($endpoint)->keyId('partner')->toRequest();
+    $server = ['CONTENT_TYPE' => 'application/json'];
+
+    foreach ($signed->headers as $name => $value) {
+        $server[strtoupper(str_replace('-', '_', $name)) === 'CONTENT_TYPE' ? 'CONTENT_TYPE' : 'HTTP_'.strtoupper(str_replace('-', '_', $name))] = $value;
+    }
+
+    $this->call('POST', $signed->uri, [], [], [], $server, $signed->body)->assertStatus(202);
+    // The byte-identical resend: sentinel's nonce store says "replayed", and the delivery is stored.
+    $this->call('POST', $signed->uri, [], [], [], $server, $signed->body)->assertStatus(200)->assertJson(['status' => 'duplicate']);
+
+    expect(InboundDelivery::query()->count())->toBe(1);
+});
+
+it('an_rfc9421_replay_of_an_unstored_request_is_refused', function (): void {
+    $endpoint = rfc9421Endpoint();
+    $signed = SignedWebhookRequest::for($endpoint)->keyId('partner')->body('not json')->toRequest();
+    $server = ['CONTENT_TYPE' => 'application/json'];
+
+    foreach ($signed->headers as $name => $value) {
+        $server[strtoupper(str_replace('-', '_', $name)) === 'CONTENT_TYPE' ? 'CONTENT_TYPE' : 'HTTP_'.strtoupper(str_replace('-', '_', $name))] = $value;
+    }
+
+    // Verified (nonce remembered), then refused at the decode step: nothing stored…
+    $this->call('POST', $signed->uri, [], [], [], $server, $signed->body)->assertStatus(400);
+    // …so the resend is not a silent "200 duplicate".
+    $this->call('POST', $signed->uri, [], [], [], $server, $signed->body)->assertStatus(401)->assertJson(['code' => 'replayed']);
+});
+
+it('falls back to the signed nonce when there is no id header', function (): void {
+    $endpoint = rfc9421Endpoint(options: ['id_header' => 'x-none']);
+
+    SignedWebhookRequest::for($endpoint)->keyId('partner')->send()->assertStatus(202);
+
+    expect(InboundDelivery::query()->sole()->idempotency_key)->toStartWith('nonce:');
+});
+
+it('refuses a missing RFC 9421 signature', function (): void {
+    $endpoint = rfc9421Endpoint();
+
+    $this->call('POST', $endpoint->url(), [], [], [], ['CONTENT_TYPE' => 'application/json'], '{}')->assertStatus(401)->assertJson(['code' => 'missing_signature']);
+});
+
+it('signs outbound RFC 9421 deliveries with a sentinel key', function (): void {
+    rfc9421Endpoint();
+    publicDns();
+    Http::fake(['*' => Http::response('ok')]);
+    $endpoint = Webhooks::outbound()->create('https://hooks.example.com/in', scheme: 'rfc9421', options: new OutboundEndpointOptions(schemeOptions: ['key_id' => 'partner']))->endpoint;
+
+    $delivery = attempt(Webhooks::send($endpoint, 'invoice.paid', ['invoice' => 1]));
+
+    expect($delivery->status)->toBe(OutboundStatus::Succeeded);
+    Http::assertSent(fn ($request): bool => $request->hasHeader('Signature') && $request->hasHeader('Signature-Input')
+        && str_contains($request->header('Signature-Input')[0], '"webhook-id"') && $request->hasHeader('webhook-id'));
+});
+
+it('fails an RFC 9421 delivery with no key to sign with', function (): void {
+    publicDns();
+    Http::fake();
+    $endpoint = Webhooks::outbound()->create('https://hooks.example.com/in', scheme: 'rfc9421')->endpoint;
+
+    $delivery = attempt(Webhooks::send($endpoint, 'invoice.paid', ['invoice' => 1]));
+
+    Http::assertNothingSent();
+    expect($delivery->status)->toBe(OutboundStatus::Failed)->and($delivery->last_error_code)->toBe(AttemptError::Signing);
+});

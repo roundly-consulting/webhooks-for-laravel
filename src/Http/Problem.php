@@ -19,16 +19,17 @@ final class Problem
     /**
      * @param  array<string, string>  $headers
      */
-    public static function response(RejectionReason $reason, array $headers = []): JsonResponse
+    public static function response(RejectionReason $reason, array $headers = [], ?int $status = null): JsonResponse
     {
         $code = $reason->publicCode();
         $title = trans('webhooks::problems.'.$code);
+        $status ??= $reason->status();
 
         return new JsonResponse([
             'title' => is_string($title) ? $title : $code,
-            'status' => $reason->status(),
+            'status' => $status,
             'code' => $code,
-        ], $reason->status(), ['Content-Type' => 'application/problem+json', ...$headers]);
+        ], $status, ['Content-Type' => 'application/problem+json', ...$headers]);
     }
 
     public static function accepted(string $id): JsonResponse

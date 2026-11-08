@@ -13,9 +13,15 @@ use RoundlyConsulting\Webhooks\Models\OutboundDelivery;
 use RoundlyConsulting\Webhooks\Models\OutboundEndpoint;
 use RoundlyConsulting\Webhooks\Testing\SignedWebhookRequest;
 use RoundlyConsulting\Webhooks\Tests\Fixtures\App\Models\Team;
+use RoundlyConsulting\Webhooks\Tests\Support\SwappedModelsTestCase;
+use RoundlyConsulting\Webhooks\Tests\Support\UlidKeyTestCase;
+use RoundlyConsulting\Webhooks\Tests\Support\UuidKeyTestCase;
 use RoundlyConsulting\Webhooks\Tests\TestCase;
 
-uses(TestCase::class)->in(__DIR__);
+uses(TestCase::class)->in('Arch', 'Feature', 'Acceptance', 'Network');
+uses(SwappedModelsTestCase::class)->in('ModelSwap');
+uses(UlidKeyTestCase::class)->in('KeyTypes/UlidKeyTest.php');
+uses(UuidKeyTestCase::class)->in('KeyTypes/UuidKeyTest.php');
 
 /** Standard Webhooks' published vector secret (24 bytes) and our V-2 / V-3 secrets (32 bytes). */
 const V1_SECRET = 'whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw';

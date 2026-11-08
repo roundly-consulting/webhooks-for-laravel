@@ -48,8 +48,6 @@ final readonly class AcceptInboundDeliveryAction
         $existing = $this->stored($endpoint, $idempotencyKey);
 
         if ($existing !== null) {
-            $this->requeueIfStalled($existing);
-
             return ['id' => $existing->public_id, 'duplicate' => true];
         }
 
@@ -106,9 +104,11 @@ final readonly class AcceptInboundDeliveryAction
     /**
      * A delivery stored but never queued (the queue was down) is queued by its duplicate.
      */
-    private function requeueIfStalled(InboundDelivery $delivery): void
+    public function requeueStalled(InboundEndpoint $endpoint, string $idempotencyKey): void
     {
-        if ($delivery->status === InboundStatus::Received && $delivery->queued_at === null) {
+        $delivery = $this->stored($endpoint, $idempotencyKey);
+
+        if ($delivery !== null && $delivery->status === InboundStatus::Received && $delivery->queued_at === null) {
             $this->queue($delivery);
         }
     }
