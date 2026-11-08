@@ -213,10 +213,11 @@ it('never stores the message of a handler exception, which may carry payload dat
     $delivery->refresh();
     $rendered = json_encode((new InboundDeliveryResource($delivery))->resolve(request()), JSON_THROW_ON_ERROR);
 
-    // The SQL with its bound values, the connection and the database stay in report() only.
-    expect($delivery->last_error_message)->toBe('QueryException (HY000)')
+    // The SQL with its bound values, the connection and the database stay in report() only:
+    // the short name and the SQLSTATE (HY000 on SQLite, 42P01 on Postgres, 42S02 on MySQL).
+    expect($delivery->last_error_message)->toMatch('/^QueryException \([0-9A-Z]{5}\)$/')
         ->and($rendered)->not->toContain('4111111111111111')->not->toContain('missing_table')
-        ->and($rendered)->toContain('QueryException (HY000)');
+        ->and($rendered)->toContain((string) $delivery->last_error_message);
 
     Webhooks::handlers()->forget('leaky');
 });

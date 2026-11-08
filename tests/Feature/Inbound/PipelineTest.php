@@ -15,6 +15,7 @@ use RoundlyConsulting\Crypto\Facades\Crypto;
 use RoundlyConsulting\Sentinel\Contracts\IdempotencyStore;
 use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\SentinelManager;
+use RoundlyConsulting\Webhooks\Actions\Inbound\AcceptInboundDeliveryAction;
 use RoundlyConsulting\Webhooks\Contracts\PayloadSanitizer;
 use RoundlyConsulting\Webhooks\Contracts\SignatureScheme;
 use RoundlyConsulting\Webhooks\DataTransferObjects\AcceptedDelivery;
@@ -28,6 +29,7 @@ use RoundlyConsulting\Webhooks\Enums\RejectionReason;
 use RoundlyConsulting\Webhooks\Enums\SecretEncoding;
 use RoundlyConsulting\Webhooks\Enums\SecretSlot;
 use RoundlyConsulting\Webhooks\Events\WebhookRejected;
+use RoundlyConsulting\Webhooks\Exceptions\WebhookSignatureException;
 use RoundlyConsulting\Webhooks\Facades\Webhooks;
 use RoundlyConsulting\Webhooks\Jobs\ProcessInboundDelivery;
 use RoundlyConsulting\Webhooks\Models\InboundDelivery;
@@ -539,4 +541,30 @@ it('lets a store failure before anything was stored surface', function (): void 
 
     expect(fn () => SignedWebhookRequest::for(inboundEndpoint())->send())->toThrow(RuntimeException::class, 'unavailable');
     expect(InboundDelivery::query()->count())->toBe(0);
+});
+
+it('answers a replay from a scheme that names no nonce as a refusal', function (): void {
+    Webhooks::schemes()->extend('replaying', static fn () => new class implements SignatureScheme
+    {
+        public function verify(IncomingWebhook $request, EndpointSecrets $secrets): VerifiedWebhook
+        {
+            throw WebhookSignatureException::because(RejectionReason::Replayed);
+        }
+    });
+    $endpoint = inboundEndpoint(['signature_scheme' => 'replaying']);
+
+    rawPost($endpoint->url(), '{}')->assertStatus(401)->assertJson(['code' => 'replayed']);
+    rawPost($endpoint->url(), '{}', ['CONTENT_TYPE' => 'application/json', 'HTTP_SIGNATURE_INPUT' => 'sig1=();created=1'])->assertStatus(401);
+});
+
+it('queues a stalled delivery found by its key when the duplicate carries no public id', function (): void {
+    Queue::fake();
+    $endpoint = inboundEndpoint();
+    SignedWebhookRequest::for($endpoint)->id('msg_stalled')->send()->assertStatus(202);
+    $delivery = InboundDelivery::query()->sole();
+    $delivery->forceFill(['status' => InboundStatus::Received, 'queued_at' => null])->save();
+
+    app(AcceptInboundDeliveryAction::class)->requeueStalled($endpoint, 'msg_stalled');
+
+    expect($delivery->refresh()->status)->toBe(InboundStatus::Queued);
 });

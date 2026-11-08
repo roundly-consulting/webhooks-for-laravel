@@ -279,6 +279,10 @@ it('refuses_a_whsec_secret_the_default_scheme_cannot_decode', function (): void 
     expect(Webhooks::inbound()->create(scheme: 'stripe', secret: 'whsec_StripeStyleSecretUsedAsRawBytes')->secret)->toBe('whsec_StripeStyleSecretUsedAsRawBytes')
         ->and(Webhooks::inbound()->create(secret: V2_SECRET)->secret)->toBe(V2_SECRET)
         ->and(Webhooks::inbound()->create(secret: 'plain-shared-secret')->secret)->toBe('plain-shared-secret');
+
+    // An endpoint whose scheme is gone: the package cannot tell how it reads secrets, so raw.
+    $orphan = inboundEndpoint(['signature_scheme' => 'vanished']);
+    expect(Webhooks::inbound()->rotateSecret($orphan, secret: 'whsec_')->secret)->toBe('whsec_');
 });
 
 it('registries_build_from_the_current_container_not_the_one_they_were_made_in', function (): void {
