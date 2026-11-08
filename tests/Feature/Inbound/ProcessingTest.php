@@ -242,3 +242,25 @@ it('a_late_failing_copy_of_a_finished_or_superseded_run_changes_nothing', functi
     expect($delivery->refresh()->status)->toBe(InboundStatus::Failed);
     Event::assertDispatched(WebhookProcessingFailed::class);
 });
+
+it('keeps the payload of a delivery still waiting to run, and fails a pruned one', function (): void {
+    Queue::fake();
+    Event::fake([WebhookReceived::class, WebhookProcessingFailed::class]);
+    postSigned(inboundEndpoint(['handler' => 'billing']))->assertStatus(202);
+    $waiting = InboundDelivery::query()->sole();
+    CarbonImmutable::setTestNow(CarbonImmutable::now()->addDays(config('webhooks.payloads.retention_days') + 1));
+
+    // Retention never clears a delivery whose handler has not run yet…
+    expect(Webhooks::prune()->inboundPayloads)->toBe(0)
+        ->and($waiting->refresh()->payload)->not->toBeNull();
+
+    // …and a run that still meets a cleared payload fails, never handing the handler [].
+    $waiting->forceFill(['payload' => null, 'payload_pruned_at' => CarbonImmutable::now()])->save();
+    app()->call([new ProcessInboundDelivery($waiting->getKey()), 'handle']);
+
+    expect($waiting->refresh()->status)->toBe(InboundStatus::Failed)
+        ->and($waiting->last_error_code)->toBe('payload_pruned');
+    Event::assertNotDispatched(WebhookReceived::class);
+    Event::assertDispatched(WebhookProcessingFailed::class, fn (WebhookProcessingFailed $event): bool => $event->errorCode === 'payload_pruned');
+    CarbonImmutable::setTestNow();
+});

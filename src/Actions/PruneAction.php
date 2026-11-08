@@ -8,14 +8,15 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use RoundlyConsulting\Webhooks\DataTransferObjects\PruneOptions;
 use RoundlyConsulting\Webhooks\DataTransferObjects\PruneResult;
+use RoundlyConsulting\Webhooks\Enums\InboundStatus;
 use RoundlyConsulting\Webhooks\Enums\OutboundStatus;
 use RoundlyConsulting\Webhooks\Support\Clock;
 use RoundlyConsulting\Webhooks\Support\ModelSeams;
 use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
 
 /**
- * Retention: payloads, bodies and response excerpts older than `payloads.retention_days` are
- * cleared; delivery and attempt rows older than `payloads.delivery_retention_days` are deleted
+ * Retention: payloads (of finished deliveries), bodies and response excerpts older than
+ * `payloads.retention_days` are cleared; delivery and attempt rows older than `payloads.delivery_retention_days` are deleted
  * for good (null keeps them), and with them deleted endpoints no delivery points at any more;
  * rotated-out secrets past their grace are cleared. Chunked; a dry run only counts.
  */
@@ -32,8 +33,10 @@ final readonly class PruneAction
         $finished = [OutboundStatus::Succeeded->value, OutboundStatus::Failed->value, OutboundStatus::Cancelled->value];
         $pruned = ['payload_pruned_at' => Clock::format($now)];
 
+        // Only finished deliveries: a run still to come would otherwise get no payload.
         $inboundPayloads = $this->clear(
-            ModelSeams::inboundDelivery()::query()->whereNotNull('payload')->where('received_at', '<', $cutoff),
+            ModelSeams::inboundDelivery()::query()->whereNotNull('payload')->where('received_at', '<', $cutoff)
+                ->whereIn('status', [InboundStatus::Processed->value, InboundStatus::Failed->value]),
             ['payload' => null, ...$pruned],
             $dry,
         );

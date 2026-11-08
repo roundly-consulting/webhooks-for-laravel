@@ -50,6 +50,15 @@ final readonly class ProcessInboundDeliveryAction
             return;
         }
 
+        // Cleared by retention: the handler would run on nothing.
+        $payload = $delivery->payload;
+
+        if ($delivery->payload_pruned_at !== null || $payload === null) {
+            $this->fail($deliveryId, null, 'payload_pruned');
+
+            return;
+        }
+
         $started = Clock::now();
         $delivery->forceFill([
             'status' => InboundStatus::Processing,
@@ -61,7 +70,7 @@ final readonly class ProcessInboundDeliveryAction
             $delivery->public_id,
             $endpoint,
             $delivery->event_type,
-            $delivery->payload ?? [],
+            $payload,
             $delivery->headers ?? [],
             $delivery->received_at,
             $isReplay,
