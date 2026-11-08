@@ -20,6 +20,7 @@ return [
         'tables' => 'The webhooks tables are missing: run the migrations.',
         'unknown_scheme' => 'An endpoint uses an unknown signature scheme.',
         'unknown_handler' => 'An endpoint uses an unknown handler.',
+        'rfc9421_no_key' => 'An RFC 9421 endpoint has no sentinel key bound to it.',
         'rfc9421_id_unsigned' => 'An RFC 9421 endpoint\'s profile does not cover its delivery id header.',
     ],
     'pruned' => 'Pruned :count record(s).',

@@ -6,9 +6,11 @@ namespace RoundlyConsulting\Webhooks\Support;
 
 use Illuminate\Support\Facades\Schema;
 use RoundlyConsulting\HttpClientRateLimits\Store\InMemoryStore;
+use RoundlyConsulting\Sentinel\SentinelManager;
 use RoundlyConsulting\Webhooks\Accessors\HandlerRegistry;
 use RoundlyConsulting\Webhooks\Accessors\SchemeRegistry;
 use RoundlyConsulting\Webhooks\Jobs\DeliverWebhook;
+use RoundlyConsulting\Webhooks\Models\InboundEndpoint;
 use RoundlyConsulting\Webhooks\Schemes\Rfc9421Scheme;
 use Throwable;
 
@@ -22,6 +24,7 @@ final readonly class Doctor
     public function __construct(
         private SchemeRegistry $schemes,
         private HandlerRegistry $handlers,
+        private SentinelManager $sentinel,
     ) {}
 
     /**
@@ -100,6 +103,10 @@ final readonly class Doctor
             if ($endpoint->signature_scheme === 'rfc9421' && ! self::profileCoversId($endpoint->scheme_options ?? [])) {
                 $findings[] = ['level' => 'warning', 'check' => 'rfc9421_id_unsigned', 'detail' => (string) Keys::of($endpoint)];
             }
+
+            if ($endpoint->signature_scheme === 'rfc9421' && ! $this->hasBoundKey($endpoint)) {
+                $findings[] = ['level' => 'warning', 'check' => 'rfc9421_no_key', 'detail' => (string) Keys::of($endpoint)];
+            }
         }
 
         foreach (ModelSeams::outboundEndpoint()::query()->cursor() as $endpoint) {
@@ -109,6 +116,30 @@ final readonly class Doctor
         }
 
         return $findings;
+    }
+
+    /**
+     * Whether a sentinel key in the endpoint's profile ring is bound to the endpoint.
+     */
+    private function hasBoundKey(InboundEndpoint $endpoint): bool
+    {
+        $options = $endpoint->scheme_options ?? [];
+        $profile = $options['profile'] ?? WebhooksConfig::rfc9421Profile();
+        $ring = is_string($profile) ? config("sentinel.signatures.profiles.{$profile}.ring") : null;
+
+        try {
+            $keys = $this->sentinel->keys()->ring(is_string($ring) ? $ring : null)->all();
+        } catch (Throwable) {
+            return false;
+        }
+
+        foreach ($keys as $key) {
+            if ($key->ownerType === $endpoint->getMorphClass() && Keys::string($key->ownerId) === Keys::string($endpoint->getKey())) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

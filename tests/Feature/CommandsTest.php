@@ -83,6 +83,7 @@ it('doctor_reports_each_misconfiguration', function (): void {
         ->expectsOutputToContain('unknown signature scheme')
         ->expectsOutputToContain('unknown handler')
         ->expectsOutputToContain('does not cover its delivery id header')
+        ->expectsOutputToContain('no sentinel key bound')
         ->assertFailed();
 });
 

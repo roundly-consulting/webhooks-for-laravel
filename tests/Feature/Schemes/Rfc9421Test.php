@@ -132,3 +132,12 @@ it('fails an RFC 9421 delivery with no key to sign with', function (): void {
     Http::assertNothingSent();
     expect($delivery->status)->toBe(OutboundStatus::Failed)->and($delivery->last_error_code)->toBe(AttemptError::Signing);
 });
+
+it('doctor finds the key bound to an RFC 9421 endpoint', function (): void {
+    config()->set('queue.default', 'database');
+    config()->set('http-client-rate-limits.store', 'cache');
+    config()->set('sentinel.signatures.profiles.default.components', ['@method', '@authority', '@path', 'webhook-id']);
+    rfc9421Endpoint();
+
+    $this->artisan('webhooks:doctor')->expectsOutputToContain('No problems found')->assertSuccessful();
+});

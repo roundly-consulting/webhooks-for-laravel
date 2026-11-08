@@ -20,6 +20,7 @@ return [
         'tables' => 'Chýbajú tabuľky webhookov: spustite migrácie.',
         'unknown_scheme' => 'Endpoint používa neznámu podpisovú schému.',
         'unknown_handler' => 'Endpoint používa neznámu obsluhu.',
+        'rfc9421_no_key' => 'Endpoint RFC 9421 nemá priradený žiadny kľúč zo sentinelu.',
         'rfc9421_id_unsigned' => 'Profil endpointu RFC 9421 nepokrýva hlavičku s identifikátorom doručenia.',
     ],
     'pruned' => 'Vyčistených záznamov: :count.',
