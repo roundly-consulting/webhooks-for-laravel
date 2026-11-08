@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace RoundlyConsulting\Webhooks\Accessors;
 
 use Closure;
-use Illuminate\Contracts\Container\Container;
+use Illuminate\Container\Container;
 use RoundlyConsulting\Webhooks\Contracts\SignatureScheme;
 use RoundlyConsulting\Webhooks\Enums\SecretEncoding;
 use RoundlyConsulting\Webhooks\Exceptions\UnknownSchemeException;
@@ -17,14 +17,13 @@ use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
  * plus any added with `extend()`. One registry per process: register extensions in a service
  * provider's `boot()` and they hold for every request, job and Octane worker request. A
  * registration made inside a request or job lasts for the rest of the process too (like
- * `Gate::define()`); `forget()` removes one (tests).
+ * `Gate::define()`); `forget()` removes one (tests). Schemes are built from the current
+ * container (Octane: the request's sandbox), never the one the registry was made in.
  */
 final class SchemeRegistry
 {
     /** @var array<string, class-string<SignatureScheme>|Closure(): SignatureScheme> */
     private array $extensions = [];
-
-    public function __construct(private readonly Container $container) {}
 
     /**
      * @param  class-string<SignatureScheme>|Closure(): SignatureScheme  $scheme
@@ -95,7 +94,7 @@ final class SchemeRegistry
             throw UnknownSchemeException::named($name);
         }
 
-        $resolved = $scheme instanceof Closure ? $scheme() : $this->container->make($scheme);
+        $resolved = $scheme instanceof Closure ? $scheme() : Container::getInstance()->make($scheme);
 
         if (! $resolved instanceof SignatureScheme) {
             throw UnknownSchemeException::notAScheme($name);

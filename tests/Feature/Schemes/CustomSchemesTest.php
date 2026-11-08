@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Carbon\CarbonImmutable;
+use Illuminate\Container\Container;
 use Illuminate\Support\Facades\Facade;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
@@ -278,4 +279,28 @@ it('refuses_a_whsec_secret_the_default_scheme_cannot_decode', function (): void 
     expect(Webhooks::inbound()->create(scheme: 'stripe', secret: 'whsec_StripeStyleSecretUsedAsRawBytes')->secret)->toBe('whsec_StripeStyleSecretUsedAsRawBytes')
         ->and(Webhooks::inbound()->create(secret: V2_SECRET)->secret)->toBe(V2_SECRET)
         ->and(Webhooks::inbound()->create(secret: 'plain-shared-secret')->secret)->toBe('plain-shared-secret');
+});
+
+it('registries_build_from_the_current_container_not_the_one_they_were_made_in', function (): void {
+    $schemes = app(SchemeRegistry::class);
+    $handlers = app(HandlerRegistry::class);
+    $base = Container::getInstance();
+    // What Octane does per request: a sandbox copy of the app becomes the current container,
+    // while the process-wide registries were built from the base application.
+    $sandbox = clone $base;
+    $scheme = new GitHubScheme;
+    $handler = new BillingWebhookHandler;
+    $sandbox->instance(GitHubScheme::class, $scheme);
+    $sandbox->instance(BillingWebhookHandler::class, $handler);
+    $handlers->register('billing-sandbox', BillingWebhookHandler::class);
+
+    Container::setInstance($sandbox);
+
+    try {
+        expect($schemes->resolve('github'))->toBe($scheme)
+            ->and($handlers->resolve('billing-sandbox'))->toBe($handler);
+    } finally {
+        Container::setInstance($base);
+        $handlers->forget('billing-sandbox');
+    }
 });

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace RoundlyConsulting\Webhooks\Accessors;
 
 use Closure;
-use Illuminate\Contracts\Container\Container;
+use Illuminate\Container\Container;
 use RoundlyConsulting\Webhooks\Contracts\InboundHandler;
 use RoundlyConsulting\Webhooks\DataTransferObjects\InboundWebhook;
 use RoundlyConsulting\Webhooks\Exceptions\UnknownHandlerException;
@@ -17,14 +17,13 @@ use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
  * plus any `register()`ed (a class or a closure). An endpoint stores the alias, never a class name. One registry per
  * process: register in a service provider's `boot()` and the handler runs for every job a worker
  * processes. A registration made inside a request or job lasts for the rest of the process too;
- * `forget()` removes one (tests).
+ * `forget()` removes one (tests). Handlers are built from the current container (Octane: the
+ * request's sandbox), never the one the registry was made in.
  */
 final class HandlerRegistry
 {
     /** @var array<string, class-string<InboundHandler>|Closure(InboundWebhook): mixed> */
     private array $registered = [];
-
-    public function __construct(private readonly Container $container) {}
 
     /**
      * @param  class-string<InboundHandler>|Closure(InboundWebhook): mixed  $handler
@@ -79,7 +78,7 @@ final class HandlerRegistry
             return new ClosureHandler($class);
         }
 
-        $handler = $this->container->make($class);
+        $handler = Container::getInstance()->make($class);
 
         // Checked again at run time: a container binding may hand back anything.
         if (! $handler instanceof InboundHandler) {
