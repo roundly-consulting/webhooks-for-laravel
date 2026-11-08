@@ -32,7 +32,9 @@ Initial public release.
   attempts over about 24 hours by default), per-endpoint throttling through
   http-client-rate-limits, connect / total timeouts, an answer read only up to `outbound.max_response_bytes` with the SSRF
   guard on or off (`response_truncated` on the attempt when cut), auto-disable after
-  consecutive failed deliveries or a 410 (`EndpointDisabled`), manual redelivery.
+  consecutive failed deliveries or a 410 (`EndpointDisabled`), manual redelivery — one delivery,
+  or after an outage every failed (and optionally cancelled) delivery of an endpoint with
+  `outbound()->redeliverFailed()` / `webhooks:redeliver --endpoint=`.
 - **SSRF protection** through safe-fetch-for-laravel — https only by default, every resolved
   address vetted against the private, loopback, link-local, metadata and reserved ranges, the
   connection pinned to the vetted addresses, redirects off (307/308 with per-hop vetting when on),

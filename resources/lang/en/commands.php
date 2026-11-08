@@ -37,4 +37,8 @@ return [
     'delivery_not_found' => 'The delivery was not found.',
     'redelivered' => 'The delivery was queued again.',
     'replayed' => 'The delivery was queued for a replay.',
+    'redeliver_arguments' => 'Give a delivery id (msg_…), or --endpoint= to redeliver every failed delivery of an endpoint.',
+    'redelivered_bulk' => 'Queued :queued delivery(ies) again; skipped :skipped whose body was pruned.',
+    'invalid_since' => 'The --since value is not a date.',
+    'endpoint_not_found' => 'The endpoint was not found.',
 ];

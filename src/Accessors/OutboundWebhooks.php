@@ -13,6 +13,7 @@ use JsonSerializable;
 use RoundlyConsulting\Webhooks\DataTransferObjects\CreatedOutboundEndpoint;
 use RoundlyConsulting\Webhooks\DataTransferObjects\OutboundEndpointChanges;
 use RoundlyConsulting\Webhooks\DataTransferObjects\OutboundEndpointOptions;
+use RoundlyConsulting\Webhooks\DataTransferObjects\RedeliveryResult;
 use RoundlyConsulting\Webhooks\DataTransferObjects\RotatedSecret;
 use RoundlyConsulting\Webhooks\Exceptions\EndpointNotFoundException;
 use RoundlyConsulting\Webhooks\Models\OutboundAttempt;
@@ -117,6 +118,16 @@ final readonly class OutboundWebhooks
         $this->guard($endpoint);
 
         return $this->manager->redeliver($delivery);
+    }
+
+    /**
+     * After an outage: redeliver every failed delivery of the endpoint (created since `$since`;
+     * with `$includeCancelled`, the ones its disable cancelled too). Deliveries whose body was
+     * pruned are skipped and counted. Enable the endpoint first.
+     */
+    public function redeliverFailed(OutboundEndpoint $endpoint, ?CarbonInterface $since = null, bool $includeCancelled = false): RedeliveryResult
+    {
+        return $this->manager->redeliverFailed($this->guard($endpoint), $since, $includeCancelled);
     }
 
     /**

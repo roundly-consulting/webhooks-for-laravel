@@ -28,6 +28,7 @@ use RoundlyConsulting\Webhooks\Actions\Outbound\BroadcastWebhookAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\CreateOutboundEndpointAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\DeleteOutboundEndpointAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\DispatchDueDeliveriesAction;
+use RoundlyConsulting\Webhooks\Actions\Outbound\RedeliverFailedDeliveriesAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\RedeliverWebhookAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\RotateOutboundSecretAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\SendWebhookAction;
@@ -42,6 +43,7 @@ use RoundlyConsulting\Webhooks\DataTransferObjects\OutboundEndpointChanges;
 use RoundlyConsulting\Webhooks\DataTransferObjects\OutboundEndpointOptions;
 use RoundlyConsulting\Webhooks\DataTransferObjects\PruneOptions;
 use RoundlyConsulting\Webhooks\DataTransferObjects\PruneResult;
+use RoundlyConsulting\Webhooks\DataTransferObjects\RedeliveryResult;
 use RoundlyConsulting\Webhooks\DataTransferObjects\RotatedSecret;
 use RoundlyConsulting\Webhooks\DataTransferObjects\VerifiedWebhook;
 use RoundlyConsulting\Webhooks\Models\InboundDelivery;
@@ -246,6 +248,14 @@ class WebhooksManager
     public function redeliver(OutboundDelivery $delivery): OutboundDelivery
     {
         return $this->container->make(RedeliverWebhookAction::class)->execute($delivery);
+    }
+
+    /**
+     * @internal what `outbound()->redeliverFailed()` (and `webhooks:redeliver --endpoint=`) calls
+     */
+    public function redeliverFailed(OutboundEndpoint $endpoint, ?CarbonInterface $since = null, bool $includeCancelled = false): RedeliveryResult
+    {
+        return $this->container->make(RedeliverFailedDeliveriesAction::class)->execute($endpoint, $since, $includeCancelled);
     }
 
     /**

@@ -31,7 +31,7 @@ use RoundlyConsulting\Webhooks\WebhooksManager;
  * @method static void assertBroadcastTimes(int $times, string $eventType, \Illuminate\Database\Eloquent\Model|null $owner = null, \Closure|null $payload = null)
  * @method static void assertNotBroadcast(string $eventType, \Illuminate\Database\Eloquent\Model|null $owner = null)
  * @method static void assertNothingBroadcast()
- * @method static void assertRedelivered(\RoundlyConsulting\Webhooks\Models\OutboundDelivery $delivery)
+ * @method static void assertRedelivered(\RoundlyConsulting\Webhooks\Models\OutboundDelivery|\RoundlyConsulting\Webhooks\Models\OutboundEndpoint $target)
  * @method static void assertNothingRedelivered()
  * @method static void assertReplayed(\RoundlyConsulting\Webhooks\Models\InboundDelivery $delivery)
  * @method static void assertNothingReplayed()

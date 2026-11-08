@@ -37,4 +37,8 @@ return [
     'delivery_not_found' => 'Doručenie sa nenašlo.',
     'redelivered' => 'Doručenie bolo znova zaradené do fronty.',
     'replayed' => 'Doručenie bolo zaradené na opakované spracovanie.',
+    'redeliver_arguments' => 'Zadajte identifikátor doručenia (msg_…) alebo --endpoint= na opätovné odoslanie všetkých neúspešných doručení endpointu.',
+    'redelivered_bulk' => 'Znova zaradené doručenia: :queued; preskočené pre vyčistené telo: :skipped.',
+    'invalid_since' => 'Hodnota --since nie je dátum.',
+    'endpoint_not_found' => 'Endpoint sa nenašiel.',
 ];

@@ -15,11 +15,14 @@ use InvalidArgumentException;
 use JsonSerializable;
 use PHPUnit\Framework\Assert as PHPUnit;
 use RoundlyConsulting\Webhooks\Actions\Outbound\BroadcastWebhookAction;
+use RoundlyConsulting\Webhooks\Actions\Outbound\RedeliverFailedDeliveriesAction;
 use RoundlyConsulting\Webhooks\Actions\Outbound\RedeliverWebhookAction;
+use RoundlyConsulting\Webhooks\DataTransferObjects\RedeliveryResult;
 use RoundlyConsulting\Webhooks\DataTransferObjects\RotatedSecret;
 use RoundlyConsulting\Webhooks\Enums\InboundStatus;
 use RoundlyConsulting\Webhooks\Enums\OutboundStatus;
 use RoundlyConsulting\Webhooks\Exceptions\DeliveryInProgressException;
+use RoundlyConsulting\Webhooks\Exceptions\EndpointNotAcceptingException;
 use RoundlyConsulting\Webhooks\Exceptions\PayloadPrunedException;
 use RoundlyConsulting\Webhooks\Models\InboundDelivery;
 use RoundlyConsulting\Webhooks\Models\InboundEndpoint;
@@ -51,6 +54,9 @@ final class WebhooksFake extends WebhooksManager
 
     /** @var list<OutboundDelivery> */
     private array $redelivered = [];
+
+    /** @var list<OutboundEndpoint> endpoints a bulk redelivery was asked for */
+    private array $bulkRedelivered = [];
 
     /** @var list<InboundDelivery> */
     private array $replayed = [];
@@ -95,6 +101,22 @@ final class WebhooksFake extends WebhooksManager
         $this->redelivered[] = $delivery;
 
         return $delivery;
+    }
+
+    /**
+     * Recorded, nothing queued: the result counts what production would queue and skip.
+     */
+    public function redeliverFailed(OutboundEndpoint $endpoint, ?CarbonInterface $since = null, bool $includeCancelled = false): RedeliveryResult
+    {
+        if (! $endpoint->enabled || $endpoint->trashed()) {
+            throw EndpointNotAcceptingException::disabled();
+        }
+
+        $this->bulkRedelivered[] = $endpoint;
+        $candidates = RedeliverFailedDeliveriesAction::candidates($endpoint, $since, $includeCancelled)->get();
+        $pruned = $candidates->filter(static fn (OutboundDelivery $delivery): bool => RedeliverFailedDeliveriesAction::pruned($delivery))->count();
+
+        return new RedeliveryResult($candidates->count() - $pruned, $pruned);
     }
 
     public function replay(InboundDelivery $delivery): InboundDelivery
@@ -273,17 +295,23 @@ final class WebhooksFake extends WebhooksManager
         PHPUnit::assertSame(0, $count, "Expected nothing to be broadcast, but {$count} broadcast(s) were.");
     }
 
-    public function assertRedelivered(OutboundDelivery $delivery): void
+    /**
+     * A delivery handed to `redeliver()` — or an endpoint handed to `redeliverFailed()`.
+     */
+    public function assertRedelivered(OutboundDelivery|OutboundEndpoint $target): void
     {
-        PHPUnit::assertNotEmpty(
-            array_filter($this->redelivered, static fn (OutboundDelivery $recorded): bool => $recorded->is($delivery)),
-            'Expected the delivery to be redelivered, but it was not.',
-        );
+        $matching = $target instanceof OutboundEndpoint
+            ? self::recorded($this->bulkRedelivered, $target)
+            : array_filter($this->redelivered, static fn (OutboundDelivery $recorded): bool => $recorded->is($target));
+
+        PHPUnit::assertNotEmpty($matching, $target instanceof OutboundEndpoint
+            ? "Expected the endpoint's failed deliveries to be redelivered, but they were not."
+            : 'Expected the delivery to be redelivered, but it was not.');
     }
 
     public function assertNothingRedelivered(): void
     {
-        $count = count($this->redelivered);
+        $count = count($this->redelivered) + count($this->bulkRedelivered);
 
         PHPUnit::assertSame(0, $count, "Expected nothing to be redelivered, but {$count} redelivery(ies) were.");
     }
