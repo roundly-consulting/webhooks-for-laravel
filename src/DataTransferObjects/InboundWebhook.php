@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace RoundlyConsulting\Webhooks\DataTransferObjects;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Arr;
 use RoundlyConsulting\Webhooks\Models\InboundEndpoint;
 
 /**
@@ -29,6 +31,32 @@ final readonly class InboundWebhook
         public int $run,
         public int $attempt,
     ) {}
+
+    /**
+     * A payload value by dot path (`data.invoice.id`), or the default. Untrusted — validate it.
+     */
+    public function get(string $path, mixed $default = null): mixed
+    {
+        return Arr::get($this->payload, $path, $default);
+    }
+
+    /**
+     * A stored request header (only those in `inbound.store_headers`), case-insensitive.
+     */
+    public function header(string $name): ?string
+    {
+        return $this->headers[strtolower($name)] ?? null;
+    }
+
+    /**
+     * The model that owns the endpoint (a team, an account), or null for an app-level endpoint.
+     */
+    public function owner(): ?Model
+    {
+        $owner = $this->endpoint->owner;
+
+        return $owner instanceof Model ? $owner : null;
+    }
 
     /**
      * Whether this is the first attempt of the run — `WebhookReceived` fires on every attempt,

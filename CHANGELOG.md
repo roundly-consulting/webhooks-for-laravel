@@ -23,7 +23,8 @@ Initial public release.
   `webhook-timestamp`, `webhook-signature`), `rfc9421` (HTTP message signatures through sentinel,
   bound to the endpoint) and your own via `Contracts\SignatureScheme` (GitHub- and Stripe-style
   recipes). Every MAC runs through `Sentinel::macs()`; a scheme never sees a secret.
-- **Queued processing** — `WebhookReceived`, then the endpoint's handler, exactly once per
+- **Queued processing** — `WebhookReceived`, then the endpoint's handler (a class or a closure;
+  `InboundWebhook::get('data.id')`, `header()`, `owner()`), once per
   delivery (sentinel's idempotent job middleware); retries, `WebhookProcessingFailed`, and replay
   of a stored delivery flagged as a replay.
 - **Outbound endpoints and sending** — `Webhooks::send()`, `Webhooks::broadcast()` and
