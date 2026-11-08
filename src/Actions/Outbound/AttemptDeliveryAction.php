@@ -318,8 +318,9 @@ final readonly class AttemptDeliveryAction
         if ($outcome->terminal || $number >= $delivery->max_attempts) {
             $this->fail($delivery, $attempt);
 
-            // A fault on this side of the wire says nothing about the receiver's endpoint.
-            if ($outcome->error !== AttemptError::Unexpected) {
+            // A fault on this side of the wire (no way to sign, an unexpected exception) says
+            // nothing about the receiver's endpoint.
+            if ($outcome->error !== AttemptError::Unexpected && $outcome->error !== AttemptError::Signing) {
                 $this->failures->execute($endpoint);
             }
 

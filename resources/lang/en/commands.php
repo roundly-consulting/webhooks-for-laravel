@@ -23,6 +23,7 @@ return [
         'rfc9421_no_key' => 'An RFC 9421 endpoint has no sentinel key bound to it.',
         'rfc9421_id_unsigned' => 'An RFC 9421 endpoint\'s profile does not cover its delivery id header.',
         'rfc9421_nonce_store' => 'Sentinel\'s nonce store cannot look a nonce up (InspectsNonces): RFC 9421 deliveries cannot be verified.',
+        'rfc9421_outbound_no_key' => 'An outbound RFC 9421 endpoint has no key id to sign with (scheme_options.key_id or webhooks.rfc9421.outbound_key_id): its deliveries fail.',
         'rfc9421_profile_weak' => 'An RFC 9421 endpoint\'s profile accepts signatures without a nonce or without a content digest: replays or altered bodies may pass.',
         'schedule_disabled' => 'The schedule is off (webhooks.schedule.enabled): run webhooks:retry every minute yourself, or parked and long-delayed deliveries never move.',
         'sweep_stalled' => 'Deliveries due for over 10 minutes are waiting for the sweep: webhooks:retry is not running.',

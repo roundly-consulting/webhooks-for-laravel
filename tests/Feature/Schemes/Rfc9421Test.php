@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use GuzzleHttp\Psr7\Request as PsrRequest;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Testing\TestResponse;
@@ -16,16 +17,24 @@ use RoundlyConsulting\Sentinel\Facades\Sentinel;
 use RoundlyConsulting\Sentinel\Http\Signatures\SignatureVerifier;
 use RoundlyConsulting\Sentinel\Keys\KeyStoreManager;
 use RoundlyConsulting\Webhooks\Contracts\PayloadSanitizer;
+use RoundlyConsulting\Webhooks\Contracts\SignatureScheme;
 use RoundlyConsulting\Webhooks\DataTransferObjects\InboundEndpointOptions;
+use RoundlyConsulting\Webhooks\DataTransferObjects\IncomingWebhook;
+use RoundlyConsulting\Webhooks\DataTransferObjects\OutboundEndpointChanges;
 use RoundlyConsulting\Webhooks\DataTransferObjects\OutboundEndpointOptions;
 use RoundlyConsulting\Webhooks\DataTransferObjects\SanitizeContext;
 use RoundlyConsulting\Webhooks\DataTransferObjects\SignedRequestData;
+use RoundlyConsulting\Webhooks\DataTransferObjects\VerifiedWebhook;
 use RoundlyConsulting\Webhooks\Enums\AttemptError;
 use RoundlyConsulting\Webhooks\Enums\OutboundStatus;
+use RoundlyConsulting\Webhooks\Enums\RejectionReason;
+use RoundlyConsulting\Webhooks\Events\EndpointDisabled;
+use RoundlyConsulting\Webhooks\Exceptions\InvalidEndpointException;
 use RoundlyConsulting\Webhooks\Exceptions\WebhookSignatureException;
 use RoundlyConsulting\Webhooks\Facades\Webhooks;
 use RoundlyConsulting\Webhooks\Models\InboundDelivery;
 use RoundlyConsulting\Webhooks\Models\InboundEndpoint;
+use RoundlyConsulting\Webhooks\Schemes\EndpointSecrets;
 use RoundlyConsulting\Webhooks\Testing\SignedWebhookRequest;
 
 const PARTNER_KEY = 'base64:cGFydG5lci1zaGFyZWQtc2VjcmV0LTMyLWJ5dGVzLWxvbmctZm9yLWhtYWM=';
@@ -143,6 +152,48 @@ it('fails an RFC 9421 delivery with no key to sign with', function (): void {
 
     Http::assertNothingSent();
     expect($delivery->status)->toBe(OutboundStatus::Failed)->and($delivery->last_error_code)->toBe(AttemptError::Signing);
+});
+
+it('never blames the receiver for a delivery this side cannot sign', function (): void {
+    Event::fake([EndpointDisabled::class]);
+    config()->set('webhooks.outbound.disable_after', 3);
+    config()->set('webhooks.outbound.max_attempts', 1);
+    publicDns();
+    Http::fake();
+    $endpoint = Webhooks::outbound()->create('https://hooks.example.com/in', scheme: 'rfc9421')->endpoint;
+    $waiting = Webhooks::send($endpoint, 'invoice.paid', ['n' => 'waiting']);
+
+    foreach (range(1, 5) as $i) {
+        expect(attempt(Webhooks::send($endpoint->refresh(), 'invoice.paid', ['n' => $i]))->last_error_code)->toBe(AttemptError::Signing);
+    }
+
+    Http::assertNothingSent();
+    Event::assertNotDispatched(EndpointDisabled::class);
+    expect($endpoint->refresh()->enabled)->toBeTrue()
+        ->and($endpoint->consecutive_failures)->toBe(0)
+        ->and($waiting->refresh()->status)->toBe(OutboundStatus::Pending);
+});
+
+it('refuses an outbound scheme that cannot sign', function (): void {
+    Webhooks::schemes()->extend('verify-only', static fn () => new class implements SignatureScheme
+    {
+        public function verify(IncomingWebhook $request, EndpointSecrets $secrets): VerifiedWebhook
+        {
+            throw WebhookSignatureException::because(RejectionReason::InvalidSignature);
+        }
+    });
+    publicDns();
+    $endpoint = Webhooks::outbound()->create('https://hooks.example.com/in')->endpoint;
+
+    expect(fn () => Webhooks::outbound()->create('https://hooks.example.com/in', scheme: 'verify-only'))->toThrow(InvalidEndpointException::class, 'cannot sign')
+        ->and(fn () => Webhooks::outbound()->update($endpoint, new OutboundEndpointChanges(scheme: 'verify-only')))->toThrow(InvalidEndpointException::class, 'cannot sign')
+        ->and($endpoint->refresh()->signature_scheme)->toBe('default')
+        // RFC 9421 signs with a sentinel key, which may come later: accepted, and the doctor warns.
+        ->and(Webhooks::outbound()->create('https://hooks.example.com/in', scheme: 'rfc9421')->endpoint->signature_scheme)->toBe('rfc9421');
+
+    $this->artisan('webhooks:doctor')->expectsOutputToContain(__('webhooks::commands.doctor.rfc9421_outbound_no_key'));
+    config()->set('webhooks.rfc9421.outbound_key_id', 'partner');
+    $this->artisan('webhooks:doctor')->doesntExpectOutputToContain(__('webhooks::commands.doctor.rfc9421_outbound_no_key'));
 });
 
 it('doctor finds the key bound to an RFC 9421 endpoint', function (): void {

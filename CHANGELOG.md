@@ -13,6 +13,13 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
   seconds) instead of `inbound.dedupe_ttl`, so two genuine deliveries with the same body minutes
   apart are no longer merged into one; past the tolerance the timestamp itself refuses the replay.
   RFC 9421 and timestamp-less schemes keep the full guard.
+- An outbound delivery this side cannot sign (an RFC 9421 endpoint with no key id, a scheme gone
+  from the registry) no longer counts towards `outbound.disable_after`: the receiver's endpoint is
+  not auto-disabled and its queued deliveries are not cancelled for a fault on the sender's side.
+- `Webhooks::outbound()->create()` and `update()` refuse a verify-only scheme (no `sign()`, not RFC
+  9421) with an `InvalidEndpointException` instead of storing an endpoint whose every delivery
+  fails. An RFC 9421 endpoint without a key id is still accepted; `webhooks:doctor` now warns about
+  it (`rfc9421_outbound_no_key`).
 
 ## 1.0.0 - 2026-11-08
 

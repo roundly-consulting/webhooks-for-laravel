@@ -29,6 +29,11 @@ final class InvalidEndpointException extends WebhooksException
         return new self(self::translated('invalid_secret'));
     }
 
+    public static function schemeCannotSign(string $scheme): self
+    {
+        return new self(self::translated('scheme_cannot_sign', ['name' => $scheme]));
+    }
+
     public static function option(string $option): self
     {
         return new self(self::translated('invalid_option', ['option' => $option]));

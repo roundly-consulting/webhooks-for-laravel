@@ -13,6 +13,7 @@ use RoundlyConsulting\Webhooks\Models\OutboundEndpoint;
 use RoundlyConsulting\Webhooks\Support\EventTypes;
 use RoundlyConsulting\Webhooks\Support\HeaderRules;
 use RoundlyConsulting\Webhooks\Support\OutboundOptions;
+use RoundlyConsulting\Webhooks\Support\OutboundSchemes;
 use RoundlyConsulting\Webhooks\Support\OutboundUrls;
 
 /**
@@ -58,7 +59,7 @@ final readonly class UpdateOutboundEndpointAction
         }
 
         if ($changes->scheme !== null) {
-            $columns['signature_scheme'] = $this->schemes->has($changes->scheme) ? $changes->scheme : throw UnknownSchemeException::named($changes->scheme);
+            $columns['signature_scheme'] = OutboundSchemes::signing($this->schemes, $changes->scheme);
         }
 
         if ($changes->options !== null) {

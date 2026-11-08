@@ -20,6 +20,7 @@ return [
     'signature_rejected' => 'Podpis webhooku bol odmietnutý (:reason).',
     'unknown_scheme' => 'Podpisová schéma [:name] nie je zaregistrovaná.',
     'not_a_scheme' => 'Podpisová schéma [:name] neimplementuje rozhranie schémy.',
+    'scheme_cannot_sign' => 'Podpisová schéma [:name] nevie podpisovať odchádzajúce webhooky.',
     'unknown_handler' => 'Obsluha webhooku [:alias] nie je zaregistrovaná.',
     'not_a_handler' => 'Obsluha webhooku [:alias] neimplementuje rozhranie obsluhy.',
     'grace_too_long' => 'Prechodné obdobie môže trvať najviac :seconds sekúnd.',

@@ -23,6 +23,7 @@ return [
         'rfc9421_no_key' => 'Endpoint RFC 9421 nemá priradený žiadny kľúč zo sentinelu.',
         'rfc9421_id_unsigned' => 'Profil endpointu RFC 9421 nepokrýva hlavičku s identifikátorom doručenia.',
         'rfc9421_nonce_store' => 'Úložisko nonce v sentineli nevie nonce vyhľadať (InspectsNonces): doručenia RFC 9421 nemožno overiť.',
+        'rfc9421_outbound_no_key' => 'Odchádzajúci endpoint RFC 9421 nemá identifikátor kľúča na podpisovanie (scheme_options.key_id ani webhooks.rfc9421.outbound_key_id): jeho doručenia zlyhajú.',
         'rfc9421_profile_weak' => 'Profil endpointu RFC 9421 prijíma podpisy bez nonce alebo bez content digest: môžu prejsť opakované požiadavky alebo zmenené telá.',
         'schedule_disabled' => 'Plánovanie je vypnuté (webhooks.schedule.enabled): spúšťajte webhooks:retry každú minútu sami, inak sa odložené doručenia nepohnú.',
         'sweep_stalled' => 'Doručenia splatné viac ako 10 minút čakajú na webhooks:retry: príkaz sa nespúšťa.',

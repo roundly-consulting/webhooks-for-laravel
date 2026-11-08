@@ -15,6 +15,7 @@ use RoundlyConsulting\Webhooks\Support\EventTypes;
 use RoundlyConsulting\Webhooks\Support\HeaderRules;
 use RoundlyConsulting\Webhooks\Support\ModelSeams;
 use RoundlyConsulting\Webhooks\Support\OutboundOptions;
+use RoundlyConsulting\Webhooks\Support\OutboundSchemes;
 use RoundlyConsulting\Webhooks\Support\OutboundUrls;
 use RoundlyConsulting\Webhooks\Support\OwnerKeys;
 use RoundlyConsulting\Webhooks\Support\Secrets;
@@ -46,9 +47,7 @@ final readonly class CreateOutboundEndpointAction
         ?OutboundEndpointOptions $options = null,
         ?Model $owner = null,
     ): CreatedOutboundEndpoint {
-        if (! $this->schemes->has($scheme)) {
-            throw UnknownSchemeException::named($scheme);
-        }
+        OutboundSchemes::signing($this->schemes, $scheme);
 
         if ($owner !== null) {
             OwnerKeys::assertFits($owner);

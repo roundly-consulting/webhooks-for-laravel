@@ -189,6 +189,9 @@ final readonly class Doctor
         foreach (ModelSeams::outboundEndpoint()::query()->cursor() as $endpoint) {
             if (! $this->schemes->has($endpoint->signature_scheme)) {
                 $findings[] = DoctorFinding::error('unknown_scheme', (string) Keys::of($endpoint));
+            } elseif ($this->schemes->resolve($endpoint->signature_scheme) instanceof Rfc9421Scheme && ! self::hasOutboundKeyId($endpoint->scheme_options ?? [])) {
+                // Accepted at create (the key may come later), but every delivery fails `signing`.
+                $findings[] = DoctorFinding::warning('rfc9421_outbound_no_key', (string) Keys::of($endpoint));
             }
         }
 
@@ -217,6 +220,16 @@ final readonly class Doctor
             ->count();
 
         return $outbound + $inbound;
+    }
+
+    /**
+     * @param  array<string, mixed>  $options
+     */
+    private static function hasOutboundKeyId(array $options): bool
+    {
+        $keyId = $options['key_id'] ?? WebhooksConfig::rfc9421OutboundKeyId();
+
+        return is_string($keyId) && $keyId !== '';
     }
 
     private static function nonceStoreInspects(): bool

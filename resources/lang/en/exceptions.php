@@ -20,6 +20,7 @@ return [
     'signature_rejected' => 'The webhook signature was rejected (:reason).',
     'unknown_scheme' => 'The signature scheme [:name] is not registered.',
     'not_a_scheme' => 'The signature scheme [:name] does not implement the scheme contract.',
+    'scheme_cannot_sign' => 'The signature scheme [:name] cannot sign outbound webhooks.',
     'unknown_handler' => 'The webhook handler [:alias] is not registered.',
     'not_a_handler' => 'The webhook handler [:alias] does not implement the handler contract.',
     'grace_too_long' => 'The grace period may be at most :seconds seconds.',
