@@ -164,24 +164,27 @@ final readonly class Doctor
                 $findings[] = DoctorFinding::error('unknown_scheme', $key);
             }
 
+            // By class: any name the registry maps to the RFC 9421 scheme.
+            $rfc9421 = $this->isRfc9421($endpoint->signature_scheme);
+
             if ($endpoint->handler !== null && ! $this->handlers->has($endpoint->handler)) {
                 $findings[] = DoctorFinding::error('unknown_handler', $key);
             }
 
-            if ($endpoint->signature_scheme === 'rfc9421' && ! self::profileCoversId($endpoint->scheme_options ?? [])) {
+            if ($rfc9421 && ! self::profileCoversId($endpoint->scheme_options ?? [])) {
                 $findings[] = DoctorFinding::warning('rfc9421_id_unsigned', $key);
             }
 
-            if ($endpoint->signature_scheme === 'rfc9421' && ! $this->hasBoundKey($endpoint)) {
+            if ($rfc9421 && ! $this->hasBoundKey($endpoint)) {
                 $findings[] = DoctorFinding::warning('rfc9421_no_key', $key);
             }
 
-            if ($endpoint->signature_scheme === 'rfc9421' && self::profileWeak($endpoint->scheme_options ?? [])) {
+            if ($rfc9421 && self::profileWeak($endpoint->scheme_options ?? [])) {
                 $findings[] = DoctorFinding::warning('rfc9421_profile_weak', $key);
             }
 
             // The pipeline verifies a nonce unused before committing it: the store must look one up.
-            if ($endpoint->signature_scheme === 'rfc9421' && ! ($inspectsNonces ??= self::nonceStoreInspects())) {
+            if ($rfc9421 && ! ($inspectsNonces ??= self::nonceStoreInspects())) {
                 $findings[] = DoctorFinding::error('rfc9421_nonce_store', $key);
             }
         }
@@ -189,7 +192,7 @@ final readonly class Doctor
         foreach (ModelSeams::outboundEndpoint()::query()->cursor() as $endpoint) {
             if (! $this->schemes->has($endpoint->signature_scheme)) {
                 $findings[] = DoctorFinding::error('unknown_scheme', (string) Keys::of($endpoint));
-            } elseif ($this->schemes->resolve($endpoint->signature_scheme) instanceof Rfc9421Scheme && ! self::hasOutboundKeyId($endpoint->scheme_options ?? [])) {
+            } elseif ($this->isRfc9421($endpoint->signature_scheme) && ! self::hasOutboundKeyId($endpoint->scheme_options ?? [])) {
                 // Accepted at create (the key may come later), but every delivery fails `signing`.
                 $findings[] = DoctorFinding::warning('rfc9421_outbound_no_key', (string) Keys::of($endpoint));
             }
@@ -220,6 +223,15 @@ final readonly class Doctor
             ->count();
 
         return $outbound + $inbound;
+    }
+
+    private function isRfc9421(string $scheme): bool
+    {
+        try {
+            return $this->schemes->has($scheme) && $this->schemes->resolve($scheme) instanceof Rfc9421Scheme;
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     /**

@@ -10,9 +10,11 @@ use RoundlyConsulting\Webhooks\DataTransferObjects\DoctorFinding;
 use RoundlyConsulting\Webhooks\Enums\FindingLevel;
 use RoundlyConsulting\Webhooks\Enums\InboundStatus;
 use RoundlyConsulting\Webhooks\Enums\OutboundStatus;
+use RoundlyConsulting\Webhooks\Facades\Webhooks;
 use RoundlyConsulting\Webhooks\Models\InboundDelivery;
 use RoundlyConsulting\Webhooks\Models\InboundEndpoint;
 use RoundlyConsulting\Webhooks\Models\OutboundDelivery;
+use RoundlyConsulting\Webhooks\Schemes\Rfc9421Scheme;
 use RoundlyConsulting\Webhooks\Support\Doctor;
 
 /**
@@ -171,6 +173,21 @@ it('doctor_flags_an_rfc9421_endpoint_whose_ring_does_not_read', function (): voi
     $endpoint = inboundEndpoint(['signature_scheme' => 'rfc9421', 'scheme_options' => ['profile' => 'broken']]);
 
     expect(doctorFinding('rfc9421_no_key')?->detail)->toBe((string) $endpoint->getKey());
+});
+
+it('checks an endpoint whose scheme name maps to the RFC 9421 class', function (): void {
+    config()->set('webhooks.schemes.sig', Rfc9421Scheme::class);
+    config()->set('sentinel.signatures.profiles.default.require_nonce', false);
+    $endpoint = inboundEndpoint(['signature_scheme' => 'sig']);
+
+    expect(doctorFinding('rfc9421_no_key')?->detail)->toBe((string) $endpoint->getKey())
+        ->and(doctorFinding('rfc9421_id_unsigned')?->detail)->toBe((string) $endpoint->getKey())
+        ->and(doctorFinding('rfc9421_profile_weak')?->detail)->toBe((string) $endpoint->getKey());
+
+    // A registration that does not build a scheme is not RFC 9421 — and does not stop the doctor.
+    Webhooks::schemes()->extend('broken', static fn (): stdClass => new stdClass);
+    inboundEndpoint(['signature_scheme' => 'broken']);
+    expect(doctorChecks())->toContain('rfc9421_no_key');
 });
 
 it('doctor_flags_an_rfc9421_profile_without_nonce_or_body_binding', function (string $flag): void {

@@ -31,6 +31,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 - `SignedWebhookRequest` builds a request by the endpoint scheme's class, not its name: a scheme
   name mapped to `Rfc9421Scheme` now signs (instead of throwing "cannot sign"), and `unsigned()` on
   a name mapped to `DefaultScheme` keeps the id and timestamp headers.
+- `webhooks:doctor` runs its RFC 9421 checks (`rfc9421_no_key`, `rfc9421_id_unsigned`,
+  `rfc9421_profile_weak`, `rfc9421_nonce_store`) on every endpoint whose scheme name maps to
+  `Rfc9421Scheme`, not only on one named `rfc9421`.
 
 ## 1.0.0 - 2026-11-08
 
