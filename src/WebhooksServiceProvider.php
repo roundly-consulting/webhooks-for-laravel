@@ -6,6 +6,7 @@ namespace RoundlyConsulting\Webhooks;
 
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Routing\Route;
 use Illuminate\Routing\Router;
@@ -24,8 +25,10 @@ use RoundlyConsulting\Webhooks\Commands\RedeliverCommand;
 use RoundlyConsulting\Webhooks\Commands\ReplayCommand;
 use RoundlyConsulting\Webhooks\Commands\RetryCommand;
 use RoundlyConsulting\Webhooks\Commands\RotateSecretCommand;
+use RoundlyConsulting\Webhooks\Contracts\BroadcastsAsWebhook;
 use RoundlyConsulting\Webhooks\Contracts\PayloadSanitizer;
 use RoundlyConsulting\Webhooks\Exceptions\InvalidWebhooksConfigurationException;
+use RoundlyConsulting\Webhooks\Listeners\BroadcastEventAsWebhook;
 use RoundlyConsulting\Webhooks\Support\InboundRoute;
 use RoundlyConsulting\Webhooks\Support\WebhooksConfig;
 
@@ -85,6 +88,7 @@ final class WebhooksServiceProvider extends PackageServiceProvider
         parent::boot();
 
         $this->registerBlueprintMacros();
+        $this->app->make(Dispatcher::class)->listen(BroadcastsAsWebhook::class, BroadcastEventAsWebhook::class);
 
         if (WebhooksConfig::routeEnabled()) {
             InboundRoute::skipBodyDecoding(WebhooksConfig::routePrefix());

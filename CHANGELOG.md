@@ -29,7 +29,8 @@ Initial public release.
   of a stored delivery flagged as a replay.
 - **Outbound endpoints and sending** — `Webhooks::send()` (idempotent with `id:` — a repeat
   returns the first delivery, for listeners that may run twice), `Webhooks::broadcast()` and
-  `Webhooks::for($owner)->broadcast()`: an envelope signed with the default scheme (both secrets
+  `Webhooks::for($owner)->broadcast()` (or put `Contracts\BroadcastsAsWebhook` on your own event
+  and dispatch it): an envelope signed with the default scheme (both secrets
   during a rotation), retries with exponential backoff and jitter honouring `Retry-After` (8
   attempts over about 24 hours by default), per-endpoint throttling through
   http-client-rate-limits, connect / total timeouts, an answer read only up to `outbound.max_response_bytes` with the SSRF
