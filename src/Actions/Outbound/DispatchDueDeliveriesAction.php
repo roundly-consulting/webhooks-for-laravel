@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace RoundlyConsulting\Webhooks\Actions\Outbound;
 
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Eloquent\Builder;
 use RoundlyConsulting\Webhooks\Enums\AttemptError;
 use RoundlyConsulting\Webhooks\Enums\InboundStatus;
 use RoundlyConsulting\Webhooks\Enums\OutboundStatus;
+use RoundlyConsulting\Webhooks\Events\DeliveryFailed;
+use RoundlyConsulting\Webhooks\Models\OutboundEndpoint;
 use RoundlyConsulting\Webhooks\Support\Clock;
 use RoundlyConsulting\Webhooks\Support\ModelSeams;
 use RoundlyConsulting\Webhooks\Support\Queues;
@@ -28,7 +31,11 @@ final readonly class DispatchDueDeliveriesAction
 {
     private const int CHUNK = 200;
 
-    public function __construct(private Queues $queues) {}
+    public function __construct(
+        private Queues $queues,
+        private RecordEndpointFailureAction $failures,
+        private Dispatcher $events,
+    ) {}
 
     public function execute(): int
     {
@@ -71,12 +78,13 @@ final readonly class DispatchDueDeliveriesAction
         ModelSeams::outboundDelivery()::query()
             ->where('status', OutboundStatus::Sending->value)
             ->where('claimed_until', '<', Clock::format($now))
-            ->chunkById(self::CHUNK, static function ($deliveries) use ($now): void {
+            ->chunkById(self::CHUNK, function ($deliveries) use ($now): void {
                 foreach ($deliveries as $delivery) {
                     $number = $delivery->attempts + 1;
-                    $attempt = ModelSeams::outboundAttempt();
+                    $class = ModelSeams::outboundAttempt();
+                    $attempt = new $class;
 
-                    (new $attempt)->forceFill([
+                    $attempt->forceFill([
                         'delivery_id' => $delivery->getKey(),
                         'series' => $delivery->series,
                         'number' => $number,
@@ -98,6 +106,14 @@ final readonly class DispatchDueDeliveriesAction
                         'dispatch_token' => null,
                         'next_attempt_at' => $final ? null : $now,
                     ])->save();
+
+                    // A lost last attempt ends the delivery like any other final failure.
+                    $this->events->dispatch(new DeliveryFailed($delivery, $attempt, $final, $final ? null : $now));
+                    $endpoint = $delivery->endpoint;
+
+                    if ($final && $endpoint instanceof OutboundEndpoint) {
+                        $this->failures->execute($endpoint);
+                    }
                 }
             });
     }

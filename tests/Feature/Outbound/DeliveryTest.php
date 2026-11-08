@@ -402,8 +402,11 @@ it('an_expired_claim_is_requeued', function (): void {
     // A lost last attempt fails the delivery.
     $last = Webhooks::send(outboundEndpoint(), 'invoice.paid', ['n' => 2]);
     $last->forceFill(['status' => OutboundStatus::Sending, 'attempts' => 7, 'claimed_until' => CarbonImmutable::now()->subSecond()])->save();
+    Event::fake([DeliveryFailed::class]);
     Webhooks::outbound()->dispatchDue();
-    expect($last->refresh()->status)->toBe(OutboundStatus::Failed);
+    expect($last->refresh()->status)->toBe(OutboundStatus::Failed)
+        ->and($last->endpoint?->consecutive_failures)->toBe(1);
+    Event::assertDispatched(DeliveryFailed::class, fn (DeliveryFailed $event): bool => $event->final && $event->attempt->error_code === AttemptError::WorkerLost);
 });
 
 it('racing_failures_disable_the_endpoint_once', function (): void {
