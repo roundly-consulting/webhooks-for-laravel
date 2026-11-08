@@ -20,7 +20,7 @@ use RoundlyConsulting\Webhooks\Tests\Support\UlidKeyTestCase;
 use RoundlyConsulting\Webhooks\Tests\Support\UuidKeyTestCase;
 use RoundlyConsulting\Webhooks\Tests\TestCase;
 
-uses(TestCase::class)->in('Arch', 'Feature', 'Acceptance', 'Network');
+uses(TestCase::class)->in('Arch', 'Feature', 'Acceptance', 'Network', 'Unit');
 uses(SwappedModelsTestCase::class)->in('ModelSwap');
 uses(InstallTestCase::class)->in('Install');
 uses(RouteOffTestCase::class)->in('RouteOff');
