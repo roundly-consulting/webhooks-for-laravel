@@ -9,7 +9,7 @@ use RoundlyConsulting\Webhooks\Exceptions\InvalidEndpointException;
 /**
  * Custom outbound headers: RFC 9110 token names, no CR/LF/NUL in values, ≤ 20 headers, ≤ 8 KB.
  * Framing, signature and proxy headers are never settable; `host` and `authorization` only when
- * `webhooks.outbound.headers.allowed_overrides` lists them.
+ * `webhooks.outbound.headers.allowed_overrides` lists them (`host` only with the SSRF guard off).
  *
  * @internal
  */
@@ -93,7 +93,11 @@ final class HeaderRules
             return 'value';
         }
 
-        if (self::reserved($lower) && ! (in_array($lower, self::OVERRIDABLE, true) && in_array($lower, $overrides, true))) {
+        // `host` only with the SSRF guard off: the guard always sends the vetted host.
+        $overridable = in_array($lower, self::OVERRIDABLE, true) && in_array($lower, $overrides, true)
+            && ! ($lower === 'host' && WebhooksConfig::ssrfEnabled());
+
+        if (self::reserved($lower) && ! $overridable) {
             return 'reserved';
         }
 

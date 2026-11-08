@@ -163,7 +163,8 @@ return [
         'follow_redirects' => false,
         'max_redirects' => 3,
         'headers' => [
-            // Reserved custom headers an endpoint may still set, e.g. ['authorization'].
+            // Reserved custom headers an endpoint may still set, e.g. ['authorization'] ('host'
+            // only with the SSRF guard off — the guard always sends the vetted host).
             'allowed_overrides' => [],
         ],
         // The User-Agent your receivers see. Blank = "{app.name} Webhooks".

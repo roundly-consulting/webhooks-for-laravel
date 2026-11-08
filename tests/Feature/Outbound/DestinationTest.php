@@ -329,3 +329,18 @@ it('an_endpoint_user_agent_replaces_the_package_one', function (): void {
     expect(Http::recorded()->map(fn (array $pair): array => $pair[0]->header('User-Agent'))->all())
         ->toBe([['TenantAgent/1.0'], ['Laravel Webhooks']]);
 });
+
+it('a_host_override_is_refused_while_the_ssrf_guard_pins_the_host', function (): void {
+    Http::fake(['*' => Http::response('ok')]);
+    config()->set('webhooks.outbound.headers.allowed_overrides', ['host']);
+
+    // The guard always sends the vetted host: a stored override would silently do nothing.
+    expect(fn () => Webhooks::outbound()->create('https://hooks.example.com/in', headers: ['Host' => 'internal.corp']))
+        ->toThrow(InvalidEndpointException::class);
+
+    config()->set('webhooks.ssrf.enabled', false);
+    $endpoint = Webhooks::outbound()->create('https://hooks.example.com/in', headers: ['Host' => 'internal.corp'])->endpoint;
+    attempt(Webhooks::send($endpoint, 'invoice.paid', []));
+
+    Http::assertSent(fn (ClientRequest $request): bool => $request->header('Host') === ['internal.corp']);
+});
